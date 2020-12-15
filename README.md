@@ -1,5 +1,4 @@
-# keyboards
-## Keyboard Files for Modified ErgoDox Keyboard
+## Files for Modified ErgoDox Keyboard
 - Profet PCB
 - Volume Rotary Encoder
 - Underglow Lights
