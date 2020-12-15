@@ -1,0 +1,1069 @@
+   1               		.file	"matrix.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               		.section	.text.init_cols,"ax",@progbits
+  12               	init_cols:
+  13               	.LFB132:
+  14               		.file 1 "keyboards/ergodox_ez/matrix.c"
+   1:keyboards/ergodox_ez/matrix.c **** /*
+   2:keyboards/ergodox_ez/matrix.c **** Copyright 2012 Jun Wako <wakojun@gmail.com>
+   3:keyboards/ergodox_ez/matrix.c **** Copyright 2013 Oleg Kostyuk <cub.uanic@gmail.com>
+   4:keyboards/ergodox_ez/matrix.c **** Copyright 2015 ZSA Technology Labs Inc (@zsa)
+   5:keyboards/ergodox_ez/matrix.c **** Copyright 2020 Christopher Courtney <drashna@live.com> (@drashna)
+   6:keyboards/ergodox_ez/matrix.c **** 
+   7:keyboards/ergodox_ez/matrix.c **** This program is free software: you can redistribute it and/or modify
+   8:keyboards/ergodox_ez/matrix.c **** it under the terms of the GNU General Public License as published by
+   9:keyboards/ergodox_ez/matrix.c **** the Free Software Foundation, either version 2 of the License, or
+  10:keyboards/ergodox_ez/matrix.c **** (at your option) any later version.
+  11:keyboards/ergodox_ez/matrix.c **** 
+  12:keyboards/ergodox_ez/matrix.c **** This program is distributed in the hope that it will be useful,
+  13:keyboards/ergodox_ez/matrix.c **** but WITHOUT ANY WARRANTY; without even the implied warranty of
+  14:keyboards/ergodox_ez/matrix.c **** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  15:keyboards/ergodox_ez/matrix.c **** GNU General Public License for more details.
+  16:keyboards/ergodox_ez/matrix.c **** 
+  17:keyboards/ergodox_ez/matrix.c **** You should have received a copy of the GNU General Public License
+  18:keyboards/ergodox_ez/matrix.c **** along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  19:keyboards/ergodox_ez/matrix.c **** */
+  20:keyboards/ergodox_ez/matrix.c **** 
+  21:keyboards/ergodox_ez/matrix.c **** 
+  22:keyboards/ergodox_ez/matrix.c **** /*
+  23:keyboards/ergodox_ez/matrix.c ****  * scan matrix
+  24:keyboards/ergodox_ez/matrix.c ****  */
+  25:keyboards/ergodox_ez/matrix.c **** #include <stdint.h>
+  26:keyboards/ergodox_ez/matrix.c **** #include <stdbool.h>
+  27:keyboards/ergodox_ez/matrix.c **** #include <avr/io.h>
+  28:keyboards/ergodox_ez/matrix.c **** #include "wait.h"
+  29:keyboards/ergodox_ez/matrix.c **** #include "action_layer.h"
+  30:keyboards/ergodox_ez/matrix.c **** #include "print.h"
+  31:keyboards/ergodox_ez/matrix.c **** #include "debug.h"
+  32:keyboards/ergodox_ez/matrix.c **** #include "util.h"
+  33:keyboards/ergodox_ez/matrix.c **** #include "matrix.h"
+  34:keyboards/ergodox_ez/matrix.c **** #include "debounce.h"
+  35:keyboards/ergodox_ez/matrix.c **** #include "ergodox_ez.h"
+  36:keyboards/ergodox_ez/matrix.c **** 
+  37:keyboards/ergodox_ez/matrix.c **** 
+  38:keyboards/ergodox_ez/matrix.c **** /*
+  39:keyboards/ergodox_ez/matrix.c ****  * This constant define not debouncing time in msecs, assuming eager_pr.
+  40:keyboards/ergodox_ez/matrix.c ****  *
+  41:keyboards/ergodox_ez/matrix.c ****  * On Ergodox matrix scan rate is relatively low, because of slow I2C.
+  42:keyboards/ergodox_ez/matrix.c ****  * Now it's only 317 scans/second, or about 3.15 msec/scan.
+  43:keyboards/ergodox_ez/matrix.c ****  * According to Cherry specs, debouncing time is 5 msec.
+  44:keyboards/ergodox_ez/matrix.c ****  *
+  45:keyboards/ergodox_ez/matrix.c ****  * However, some switches seem to have higher debouncing requirements, or
+  46:keyboards/ergodox_ez/matrix.c ****  * something else might be wrong. (Also, the scan speed has improved since
+  47:keyboards/ergodox_ez/matrix.c ****  * that comment was written.)
+  48:keyboards/ergodox_ez/matrix.c ****  */
+  49:keyboards/ergodox_ez/matrix.c **** 
+  50:keyboards/ergodox_ez/matrix.c **** /* matrix state(1:on, 0:off) */
+  51:keyboards/ergodox_ez/matrix.c **** extern matrix_row_t matrix[MATRIX_ROWS];      // debounced values
+  52:keyboards/ergodox_ez/matrix.c **** extern matrix_row_t raw_matrix[MATRIX_ROWS];  // raw values
+  53:keyboards/ergodox_ez/matrix.c **** 
+  54:keyboards/ergodox_ez/matrix.c **** static matrix_row_t read_cols(uint8_t row);
+  55:keyboards/ergodox_ez/matrix.c **** static void         init_cols(void);
+  56:keyboards/ergodox_ez/matrix.c **** static void         unselect_rows(void);
+  57:keyboards/ergodox_ez/matrix.c **** static void         select_row(uint8_t row);
+  58:keyboards/ergodox_ez/matrix.c **** 
+  59:keyboards/ergodox_ez/matrix.c **** static uint8_t mcp23018_reset_loop;
+  60:keyboards/ergodox_ez/matrix.c **** 
+  61:keyboards/ergodox_ez/matrix.c **** void matrix_init_custom(void) {
+  62:keyboards/ergodox_ez/matrix.c ****     // initialize row and col
+  63:keyboards/ergodox_ez/matrix.c **** 
+  64:keyboards/ergodox_ez/matrix.c ****     mcp23018_status = init_mcp23018();
+  65:keyboards/ergodox_ez/matrix.c **** 
+  66:keyboards/ergodox_ez/matrix.c ****     unselect_rows();
+  67:keyboards/ergodox_ez/matrix.c ****     init_cols();
+  68:keyboards/ergodox_ez/matrix.c **** }
+  69:keyboards/ergodox_ez/matrix.c **** 
+  70:keyboards/ergodox_ez/matrix.c **** // Reads and stores a row, returning
+  71:keyboards/ergodox_ez/matrix.c **** // whether a change occurred.
+  72:keyboards/ergodox_ez/matrix.c **** static inline bool store_raw_matrix_row(uint8_t index) {
+  73:keyboards/ergodox_ez/matrix.c ****     matrix_row_t temp = read_cols(index);
+  74:keyboards/ergodox_ez/matrix.c ****     if (raw_matrix[index] != temp) {
+  75:keyboards/ergodox_ez/matrix.c ****         raw_matrix[index] = temp;
+  76:keyboards/ergodox_ez/matrix.c ****         return true;
+  77:keyboards/ergodox_ez/matrix.c ****     }
+  78:keyboards/ergodox_ez/matrix.c ****     return false;
+  79:keyboards/ergodox_ez/matrix.c **** }
+  80:keyboards/ergodox_ez/matrix.c **** 
+  81:keyboards/ergodox_ez/matrix.c **** bool matrix_scan_custom(matrix_row_t current_matrix[]) {
+  82:keyboards/ergodox_ez/matrix.c ****     if (mcp23018_status) {  // if there was an error
+  83:keyboards/ergodox_ez/matrix.c ****         if (++mcp23018_reset_loop == 0) {
+  84:keyboards/ergodox_ez/matrix.c ****             print("trying to reset mcp23018\n");
+  85:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = init_mcp23018();
+  86:keyboards/ergodox_ez/matrix.c ****             if (mcp23018_status) {
+  87:keyboards/ergodox_ez/matrix.c ****                 print("left side not responding\n");
+  88:keyboards/ergodox_ez/matrix.c ****             } else {
+  89:keyboards/ergodox_ez/matrix.c ****                 print("left side attached\n");
+  90:keyboards/ergodox_ez/matrix.c ****                 ergodox_blink_all_leds();
+  91:keyboards/ergodox_ez/matrix.c **** #ifdef RGB_MATRIX_ENABLE
+  92:keyboards/ergodox_ez/matrix.c ****                 rgb_matrix_init();  // re-init driver on reconnect
+  93:keyboards/ergodox_ez/matrix.c **** #endif
+  94:keyboards/ergodox_ez/matrix.c ****             }
+  95:keyboards/ergodox_ez/matrix.c ****         }
+  96:keyboards/ergodox_ez/matrix.c ****     }
+  97:keyboards/ergodox_ez/matrix.c **** 
+  98:keyboards/ergodox_ez/matrix.c **** #ifdef LEFT_LEDS
+  99:keyboards/ergodox_ez/matrix.c ****     mcp23018_status = ergodox_left_leds_update();
+ 100:keyboards/ergodox_ez/matrix.c **** #endif  // LEFT_LEDS
+ 101:keyboards/ergodox_ez/matrix.c ****     bool changed = false;
+ 102:keyboards/ergodox_ez/matrix.c ****     for (uint8_t i = 0; i < MATRIX_ROWS_PER_SIDE; i++) {
+ 103:keyboards/ergodox_ez/matrix.c ****         // select rows from left and right hands
+ 104:keyboards/ergodox_ez/matrix.c ****         uint8_t left_index  = i;
+ 105:keyboards/ergodox_ez/matrix.c ****         uint8_t right_index = i + MATRIX_ROWS_PER_SIDE;
+ 106:keyboards/ergodox_ez/matrix.c ****         select_row(left_index);
+ 107:keyboards/ergodox_ez/matrix.c ****         select_row(right_index);
+ 108:keyboards/ergodox_ez/matrix.c **** 
+ 109:keyboards/ergodox_ez/matrix.c ****         changed |= store_raw_matrix_row(left_index);
+ 110:keyboards/ergodox_ez/matrix.c ****         changed |= store_raw_matrix_row(right_index);
+ 111:keyboards/ergodox_ez/matrix.c **** 
+ 112:keyboards/ergodox_ez/matrix.c ****         unselect_rows();
+ 113:keyboards/ergodox_ez/matrix.c ****     }
+ 114:keyboards/ergodox_ez/matrix.c **** 
+ 115:keyboards/ergodox_ez/matrix.c ****     return changed;
+ 116:keyboards/ergodox_ez/matrix.c **** }
+ 117:keyboards/ergodox_ez/matrix.c **** 
+ 118:keyboards/ergodox_ez/matrix.c **** /* Column pin configuration
+ 119:keyboards/ergodox_ez/matrix.c ****  *
+ 120:keyboards/ergodox_ez/matrix.c ****  * Teensy
+ 121:keyboards/ergodox_ez/matrix.c ****  * col: 0   1   2   3   4   5
+ 122:keyboards/ergodox_ez/matrix.c ****  * pin: F0  F1  F4  F5  F6  F7
+ 123:keyboards/ergodox_ez/matrix.c ****  *
+ 124:keyboards/ergodox_ez/matrix.c ****  * MCP23018
+ 125:keyboards/ergodox_ez/matrix.c ****  * col: 0   1   2   3   4   5
+ 126:keyboards/ergodox_ez/matrix.c ****  * pin: B5  B4  B3  B2  B1  B0
+ 127:keyboards/ergodox_ez/matrix.c ****  */
+ 128:keyboards/ergodox_ez/matrix.c **** static void init_cols(void) {
+  15               		.loc 1 128 29 view -0
+  16               		.cfi_startproc
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+ 129:keyboards/ergodox_ez/matrix.c ****     // init on mcp23018
+ 130:keyboards/ergodox_ez/matrix.c ****     // not needed, already done as part of init_mcp23018()
+ 131:keyboards/ergodox_ez/matrix.c **** 
+ 132:keyboards/ergodox_ez/matrix.c ****     // init on teensy
+ 133:keyboards/ergodox_ez/matrix.c ****     setPinInputHigh(F0);
+  21               		.loc 1 133 5 view .LVU1
+  22 0000 8098      		cbi 0x10,0
+  23 0002 889A      		sbi 0x11,0
+ 134:keyboards/ergodox_ez/matrix.c ****     setPinInputHigh(F1);
+  24               		.loc 1 134 5 view .LVU2
+  25 0004 8198      		cbi 0x10,1
+  26 0006 899A      		sbi 0x11,1
+ 135:keyboards/ergodox_ez/matrix.c ****     setPinInputHigh(F4);
+  27               		.loc 1 135 5 view .LVU3
+  28 0008 8498      		cbi 0x10,4
+  29 000a 8C9A      		sbi 0x11,4
+ 136:keyboards/ergodox_ez/matrix.c ****     setPinInputHigh(F5);
+  30               		.loc 1 136 5 view .LVU4
+  31 000c 8598      		cbi 0x10,5
+  32 000e 8D9A      		sbi 0x11,5
+ 137:keyboards/ergodox_ez/matrix.c ****     setPinInputHigh(F6);
+  33               		.loc 1 137 5 view .LVU5
+  34 0010 8698      		cbi 0x10,6
+  35 0012 8E9A      		sbi 0x11,6
+ 138:keyboards/ergodox_ez/matrix.c ****     setPinInputHigh(F7);
+  36               		.loc 1 138 5 view .LVU6
+  37 0014 8798      		cbi 0x10,7
+  38 0016 8F9A      		sbi 0x11,7
+  39               	/* epilogue start */
+ 139:keyboards/ergodox_ez/matrix.c **** }
+  40               		.loc 1 139 1 is_stmt 0 view .LVU7
+  41 0018 0895      		ret
+  42               		.cfi_endproc
+  43               	.LFE132:
+  45               		.section	.text.unselect_rows,"ax",@progbits
+  47               	unselect_rows:
+  48               	.LFB134:
+ 140:keyboards/ergodox_ez/matrix.c **** 
+ 141:keyboards/ergodox_ez/matrix.c **** static matrix_row_t read_cols(uint8_t row) {
+ 142:keyboards/ergodox_ez/matrix.c ****     if (row < 7) {
+ 143:keyboards/ergodox_ez/matrix.c ****         if (mcp23018_status) {  // if there was an error
+ 144:keyboards/ergodox_ez/matrix.c ****             return 0;
+ 145:keyboards/ergodox_ez/matrix.c ****         } else {
+ 146:keyboards/ergodox_ez/matrix.c ****             uint8_t data = 0;
+ 147:keyboards/ergodox_ez/matrix.c ****             // reading GPIOB (column port) since in mcp23018's sequential mode
+ 148:keyboards/ergodox_ez/matrix.c ****             // it is addressed directly after writing to GPIOA in select_row()
+ 149:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_start(I2C_ADDR_READ, ERGODOX_EZ_I2C_TIMEOUT);    if (mcp23018_sta
+ 150:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_read_nack(ERGODOX_EZ_I2C_TIMEOUT);               if (mcp23018_sta
+ 151:keyboards/ergodox_ez/matrix.c ****             data            = ~((uint8_t)mcp23018_status);
+ 152:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = I2C_STATUS_SUCCESS;
+ 153:keyboards/ergodox_ez/matrix.c ****         out:
+ 154:keyboards/ergodox_ez/matrix.c ****             i2c_stop();
+ 155:keyboards/ergodox_ez/matrix.c ****             return data;
+ 156:keyboards/ergodox_ez/matrix.c ****         }
+ 157:keyboards/ergodox_ez/matrix.c ****     } else {
+ 158:keyboards/ergodox_ez/matrix.c ****         /* read from teensy
+ 159:keyboards/ergodox_ez/matrix.c ****          * bitmask is 0b11110011, but we want those all
+ 160:keyboards/ergodox_ez/matrix.c ****          * in the lower six bits.
+ 161:keyboards/ergodox_ez/matrix.c ****          * we'll return 1s for the top two, but that's harmless.
+ 162:keyboards/ergodox_ez/matrix.c ****          */
+ 163:keyboards/ergodox_ez/matrix.c **** 
+ 164:keyboards/ergodox_ez/matrix.c ****         return ~((PINF & 0x03) | ((PINF & 0xF0) >> 2));
+ 165:keyboards/ergodox_ez/matrix.c ****     }
+ 166:keyboards/ergodox_ez/matrix.c **** }
+ 167:keyboards/ergodox_ez/matrix.c **** 
+ 168:keyboards/ergodox_ez/matrix.c **** /* Row pin configuration
+ 169:keyboards/ergodox_ez/matrix.c ****  *
+ 170:keyboards/ergodox_ez/matrix.c ****  * Teensy
+ 171:keyboards/ergodox_ez/matrix.c ****  * row: 7   8   9   10  11  12  13
+ 172:keyboards/ergodox_ez/matrix.c ****  * pin: B0  B1  B2  B3  D2  D3  C6
+ 173:keyboards/ergodox_ez/matrix.c ****  *
+ 174:keyboards/ergodox_ez/matrix.c ****  * MCP23018
+ 175:keyboards/ergodox_ez/matrix.c ****  * row: 0   1   2   3   4   5   6
+ 176:keyboards/ergodox_ez/matrix.c ****  * pin: A0  A1  A2  A3  A4  A5  A6
+ 177:keyboards/ergodox_ez/matrix.c ****  */
+ 178:keyboards/ergodox_ez/matrix.c **** static void unselect_rows(void) {
+  49               		.loc 1 178 33 is_stmt 1 view -0
+  50               		.cfi_startproc
+  51               	/* prologue: function */
+  52               	/* frame size = 0 */
+  53               	/* stack size = 0 */
+  54               	.L__stack_usage = 0
+ 179:keyboards/ergodox_ez/matrix.c ****     // no need to unselect on mcp23018, because the select step sets all
+ 180:keyboards/ergodox_ez/matrix.c ****     // the other row bits high, and it's not changing to a different
+ 181:keyboards/ergodox_ez/matrix.c ****     // direction
+ 182:keyboards/ergodox_ez/matrix.c **** 
+ 183:keyboards/ergodox_ez/matrix.c ****     // unselect on teensy
+ 184:keyboards/ergodox_ez/matrix.c ****     setPinInput(B0);
+  55               		.loc 1 184 5 view .LVU9
+  56 0000 2098      		cbi 0x4,0
+  57 0002 2898      		cbi 0x5,0
+ 185:keyboards/ergodox_ez/matrix.c ****     setPinInput(B1);
+  58               		.loc 1 185 5 view .LVU10
+  59 0004 2198      		cbi 0x4,1
+  60 0006 2998      		cbi 0x5,1
+ 186:keyboards/ergodox_ez/matrix.c ****     setPinInput(B2);
+  61               		.loc 1 186 5 view .LVU11
+  62 0008 2298      		cbi 0x4,2
+  63 000a 2A98      		cbi 0x5,2
+ 187:keyboards/ergodox_ez/matrix.c ****     setPinInput(B3);
+  64               		.loc 1 187 5 view .LVU12
+  65 000c 2398      		cbi 0x4,3
+  66 000e 2B98      		cbi 0x5,3
+ 188:keyboards/ergodox_ez/matrix.c ****     setPinInput(D2);
+  67               		.loc 1 188 5 view .LVU13
+  68 0010 5298      		cbi 0xa,2
+  69 0012 5A98      		cbi 0xb,2
+ 189:keyboards/ergodox_ez/matrix.c ****     setPinInput(D3);
+  70               		.loc 1 189 5 view .LVU14
+  71 0014 5398      		cbi 0xa,3
+  72 0016 5B98      		cbi 0xb,3
+ 190:keyboards/ergodox_ez/matrix.c ****     setPinInput(C6);
+  73               		.loc 1 190 5 view .LVU15
+  74 0018 3E98      		cbi 0x7,6
+  75 001a 4698      		cbi 0x8,6
+  76               	/* epilogue start */
+ 191:keyboards/ergodox_ez/matrix.c **** }
+  77               		.loc 1 191 1 is_stmt 0 view .LVU16
+  78 001c 0895      		ret
+  79               		.cfi_endproc
+  80               	.LFE134:
+  82               		.section	.text.select_row,"ax",@progbits
+  84               	select_row:
+  85               	.LVL0:
+  86               	.LFB135:
+ 192:keyboards/ergodox_ez/matrix.c **** 
+ 193:keyboards/ergodox_ez/matrix.c **** static void select_row(uint8_t row) {
+  87               		.loc 1 193 37 is_stmt 1 view -0
+  88               		.cfi_startproc
+  89               		.loc 1 193 37 is_stmt 0 view .LVU18
+  90 0000 CF93      		push r28
+  91               	.LCFI0:
+  92               		.cfi_def_cfa_offset 3
+  93               		.cfi_offset 28, -2
+  94               	/* prologue: function */
+  95               	/* frame size = 0 */
+  96               	/* stack size = 1 */
+  97               	.L__stack_usage = 1
+  98 0002 C82F      		mov r28,r24
+ 194:keyboards/ergodox_ez/matrix.c ****     if (row < 7) {
+  99               		.loc 1 194 5 is_stmt 1 view .LVU19
+ 100               		.loc 1 194 8 is_stmt 0 view .LVU20
+ 101 0004 8730      		cpi r24,lo8(7)
+ 102 0006 00F4      		brsh .L4
+ 195:keyboards/ergodox_ez/matrix.c ****         // select on mcp23018
+ 196:keyboards/ergodox_ez/matrix.c ****         if (!mcp23018_status) {
+ 103               		.loc 1 196 9 is_stmt 1 view .LVU21
+ 104               		.loc 1 196 12 is_stmt 0 view .LVU22
+ 105 0008 8091 0000 		lds r24,mcp23018_status
+ 106 000c 9091 0000 		lds r25,mcp23018_status+1
+ 107               	.LVL1:
+ 108               		.loc 1 196 12 view .LVU23
+ 109 0010 892B      		or r24,r25
+ 110 0012 01F4      		brne .L3
+ 197:keyboards/ergodox_ez/matrix.c ****             // set active row low  : 0
+ 198:keyboards/ergodox_ez/matrix.c ****             // set other rows hi-Z : 1
+ 199:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_start(I2C_ADDR_WRITE, ERGODOX_EZ_I2C_TIMEOUT);        if (mcp2301
+ 111               		.loc 1 199 13 is_stmt 1 view .LVU24
+ 112               		.loc 1 199 31 is_stmt 0 view .LVU25
+ 113 0014 64E6      		ldi r22,lo8(100)
+ 114 0016 70E0      		ldi r23,0
+ 115 0018 80E4      		ldi r24,lo8(64)
+ 116 001a 0E94 0000 		call i2c_start
+ 117               	.LVL2:
+ 118               		.loc 1 199 29 view .LVU26
+ 119 001e 9093 0000 		sts mcp23018_status+1,r25
+ 120 0022 8093 0000 		sts mcp23018_status,r24
+ 121               		.loc 1 199 89 is_stmt 1 view .LVU27
+ 122               		.loc 1 199 92 is_stmt 0 view .LVU28
+ 123 0026 892B      		or r24,r25
+ 124 0028 01F4      		brne .L7
+ 200:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_write(GPIOA, ERGODOX_EZ_I2C_TIMEOUT);                 if (mcp2301
+ 125               		.loc 1 200 13 is_stmt 1 view .LVU29
+ 126               		.loc 1 200 31 is_stmt 0 view .LVU30
+ 127 002a 64E6      		ldi r22,lo8(100)
+ 128 002c 70E0      		ldi r23,0
+ 129 002e 82E1      		ldi r24,lo8(18)
+ 130 0030 0E94 0000 		call i2c_write
+ 131               	.LVL3:
+ 132               		.loc 1 200 29 view .LVU31
+ 133 0034 9093 0000 		sts mcp23018_status+1,r25
+ 134 0038 8093 0000 		sts mcp23018_status,r24
+ 135               		.loc 1 200 89 is_stmt 1 view .LVU32
+ 136               		.loc 1 200 92 is_stmt 0 view .LVU33
+ 137 003c 892B      		or r24,r25
+ 138 003e 01F4      		brne .L7
+ 201:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_write(0xFF & ~(1 << row), ERGODOX_EZ_I2C_TIMEOUT);    if (mcp2301
+ 139               		.loc 1 201 13 is_stmt 1 view .LVU34
+ 140               		.loc 1 201 52 is_stmt 0 view .LVU35
+ 141 0040 81E0      		ldi r24,lo8(1)
+ 142 0042 90E0      		ldi r25,0
+ 143 0044 00C0      		rjmp 2f
+ 144               		1:
+ 145 0046 880F      		lsl r24
+ 146               		2:
+ 147 0048 CA95      		dec r28
+ 148 004a 02F4      		brpl 1b
+ 149               		.loc 1 201 31 view .LVU36
+ 150 004c 64E6      		ldi r22,lo8(100)
+ 151 004e 70E0      		ldi r23,0
+ 152 0050 8095      		com r24
+ 153 0052 0E94 0000 		call i2c_write
+ 154               	.LVL4:
+ 155               		.loc 1 201 29 view .LVU37
+ 156 0056 9093 0000 		sts mcp23018_status+1,r25
+ 157 005a 8093 0000 		sts mcp23018_status,r24
+ 158               		.loc 1 201 89 is_stmt 1 view .LVU38
+ 159               	.L7:
+ 202:keyboards/ergodox_ez/matrix.c ****         out:
+ 203:keyboards/ergodox_ez/matrix.c ****             i2c_stop();
+ 160               		.loc 1 203 13 view .LVU39
+ 161               	/* epilogue start */
+ 204:keyboards/ergodox_ez/matrix.c ****         }
+ 205:keyboards/ergodox_ez/matrix.c ****     } else {
+ 206:keyboards/ergodox_ez/matrix.c ****         // select on teensy
+ 207:keyboards/ergodox_ez/matrix.c ****         // Output low(DDR:1, PORT:0) to select
+ 208:keyboards/ergodox_ez/matrix.c ****         switch (row) {
+ 209:keyboards/ergodox_ez/matrix.c ****             case 7:
+ 210:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(B0);
+ 211:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B0);
+ 212:keyboards/ergodox_ez/matrix.c ****                 break;
+ 213:keyboards/ergodox_ez/matrix.c ****             case 8:
+ 214:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(B1);
+ 215:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B1);
+ 216:keyboards/ergodox_ez/matrix.c ****                 break;
+ 217:keyboards/ergodox_ez/matrix.c ****             case 9:
+ 218:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(B2);
+ 219:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B2);
+ 220:keyboards/ergodox_ez/matrix.c ****                 break;
+ 221:keyboards/ergodox_ez/matrix.c ****             case 10:
+ 222:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(B3);
+ 223:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B3);
+ 224:keyboards/ergodox_ez/matrix.c ****                 break;
+ 225:keyboards/ergodox_ez/matrix.c ****             case 11:
+ 226:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(D2);
+ 227:keyboards/ergodox_ez/matrix.c ****                 writePinLow(D2);
+ 228:keyboards/ergodox_ez/matrix.c ****                 break;
+ 229:keyboards/ergodox_ez/matrix.c ****             case 12:
+ 230:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(D3);
+ 231:keyboards/ergodox_ez/matrix.c ****                 writePinLow(D3);
+ 232:keyboards/ergodox_ez/matrix.c ****                 break;
+ 233:keyboards/ergodox_ez/matrix.c ****             case 13:
+ 234:keyboards/ergodox_ez/matrix.c ****                 setPinOutput(C6);
+ 235:keyboards/ergodox_ez/matrix.c ****                 writePinLow(C6);
+ 236:keyboards/ergodox_ez/matrix.c ****                 break;
+ 237:keyboards/ergodox_ez/matrix.c ****         }
+ 238:keyboards/ergodox_ez/matrix.c ****     }
+ 239:keyboards/ergodox_ez/matrix.c **** }
+ 162               		.loc 1 239 1 is_stmt 0 view .LVU40
+ 163 005e CF91      		pop r28
+ 164               	.LVL5:
+ 203:keyboards/ergodox_ez/matrix.c ****         }
+ 165               		.loc 1 203 13 view .LVU41
+ 166 0060 0C94 0000 		jmp i2c_stop
+ 167               	.LVL6:
+ 168               	.L4:
+ 208:keyboards/ergodox_ez/matrix.c ****             case 7:
+ 169               		.loc 1 208 9 is_stmt 1 view .LVU42
+ 170 0064 8A30      		cpi r24,lo8(10)
+ 171 0066 01F0      		breq .L9
+ 172 0068 00F4      		brsh .L10
+ 173 006a 8830      		cpi r24,lo8(8)
+ 174 006c 01F0      		breq .L11
+ 175 006e 8930      		cpi r24,lo8(9)
+ 176 0070 01F0      		breq .L12
+ 177               	.L13:
+ 210:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B0);
+ 178               		.loc 1 210 17 view .LVU43
+ 179 0072 209A      		sbi 0x4,0
+ 211:keyboards/ergodox_ez/matrix.c ****                 break;
+ 180               		.loc 1 211 17 view .LVU44
+ 181 0074 2898      		cbi 0x5,0
+ 212:keyboards/ergodox_ez/matrix.c ****             case 8:
+ 182               		.loc 1 212 17 view .LVU45
+ 183               	.LVL7:
+ 184               	.L3:
+ 185               	/* epilogue start */
+ 186               		.loc 1 239 1 is_stmt 0 view .LVU46
+ 187 0076 CF91      		pop r28
+ 188               	.LVL8:
+ 189               		.loc 1 239 1 view .LVU47
+ 190 0078 0895      		ret
+ 191               	.LVL9:
+ 192               	.L10:
+ 208:keyboards/ergodox_ez/matrix.c ****             case 7:
+ 193               		.loc 1 208 9 view .LVU48
+ 194 007a 8C30      		cpi r24,lo8(12)
+ 195 007c 01F0      		breq .L14
+ 196 007e 00F0      		brlo .L15
+ 197 0080 8D30      		cpi r24,lo8(13)
+ 198 0082 01F4      		brne .L13
+ 234:keyboards/ergodox_ez/matrix.c ****                 writePinLow(C6);
+ 199               		.loc 1 234 17 is_stmt 1 view .LVU49
+ 200 0084 3E9A      		sbi 0x7,6
+ 235:keyboards/ergodox_ez/matrix.c ****                 break;
+ 201               		.loc 1 235 17 view .LVU50
+ 202 0086 4698      		cbi 0x8,6
+ 236:keyboards/ergodox_ez/matrix.c ****         }
+ 203               		.loc 1 236 17 view .LVU51
+ 204               		.loc 1 239 1 is_stmt 0 view .LVU52
+ 205 0088 00C0      		rjmp .L3
+ 206               	.L11:
+ 214:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B1);
+ 207               		.loc 1 214 17 is_stmt 1 view .LVU53
+ 208 008a 219A      		sbi 0x4,1
+ 215:keyboards/ergodox_ez/matrix.c ****                 break;
+ 209               		.loc 1 215 17 view .LVU54
+ 210 008c 2998      		cbi 0x5,1
+ 216:keyboards/ergodox_ez/matrix.c ****             case 9:
+ 211               		.loc 1 216 17 view .LVU55
+ 212 008e 00C0      		rjmp .L3
+ 213               	.L12:
+ 218:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B2);
+ 214               		.loc 1 218 17 view .LVU56
+ 215 0090 229A      		sbi 0x4,2
+ 219:keyboards/ergodox_ez/matrix.c ****                 break;
+ 216               		.loc 1 219 17 view .LVU57
+ 217 0092 2A98      		cbi 0x5,2
+ 220:keyboards/ergodox_ez/matrix.c ****             case 10:
+ 218               		.loc 1 220 17 view .LVU58
+ 219 0094 00C0      		rjmp .L3
+ 220               	.L9:
+ 222:keyboards/ergodox_ez/matrix.c ****                 writePinLow(B3);
+ 221               		.loc 1 222 17 view .LVU59
+ 222 0096 239A      		sbi 0x4,3
+ 223:keyboards/ergodox_ez/matrix.c ****                 break;
+ 223               		.loc 1 223 17 view .LVU60
+ 224 0098 2B98      		cbi 0x5,3
+ 224:keyboards/ergodox_ez/matrix.c ****             case 11:
+ 225               		.loc 1 224 17 view .LVU61
+ 226 009a 00C0      		rjmp .L3
+ 227               	.L15:
+ 226:keyboards/ergodox_ez/matrix.c ****                 writePinLow(D2);
+ 228               		.loc 1 226 17 view .LVU62
+ 229 009c 529A      		sbi 0xa,2
+ 227:keyboards/ergodox_ez/matrix.c ****                 break;
+ 230               		.loc 1 227 17 view .LVU63
+ 231 009e 5A98      		cbi 0xb,2
+ 228:keyboards/ergodox_ez/matrix.c ****             case 12:
+ 232               		.loc 1 228 17 view .LVU64
+ 233 00a0 00C0      		rjmp .L3
+ 234               	.L14:
+ 230:keyboards/ergodox_ez/matrix.c ****                 writePinLow(D3);
+ 235               		.loc 1 230 17 view .LVU65
+ 236 00a2 539A      		sbi 0xa,3
+ 231:keyboards/ergodox_ez/matrix.c ****                 break;
+ 237               		.loc 1 231 17 view .LVU66
+ 238 00a4 5B98      		cbi 0xb,3
+ 232:keyboards/ergodox_ez/matrix.c ****             case 13:
+ 239               		.loc 1 232 17 view .LVU67
+ 240 00a6 00C0      		rjmp .L3
+ 241               		.cfi_endproc
+ 242               	.LFE135:
+ 244               		.section	.text.read_cols,"ax",@progbits
+ 246               	read_cols:
+ 247               	.LVL10:
+ 248               	.LFB133:
+ 141:keyboards/ergodox_ez/matrix.c ****     if (row < 7) {
+ 249               		.loc 1 141 44 view -0
+ 250               		.cfi_startproc
+ 141:keyboards/ergodox_ez/matrix.c ****     if (row < 7) {
+ 251               		.loc 1 141 44 is_stmt 0 view .LVU69
+ 252 0000 CF93      		push r28
+ 253               	.LCFI1:
+ 254               		.cfi_def_cfa_offset 3
+ 255               		.cfi_offset 28, -2
+ 256               	/* prologue: function */
+ 257               	/* frame size = 0 */
+ 258               	/* stack size = 1 */
+ 259               	.L__stack_usage = 1
+ 142:keyboards/ergodox_ez/matrix.c ****         if (mcp23018_status) {  // if there was an error
+ 260               		.loc 1 142 5 is_stmt 1 view .LVU70
+ 142:keyboards/ergodox_ez/matrix.c ****         if (mcp23018_status) {  // if there was an error
+ 261               		.loc 1 142 8 is_stmt 0 view .LVU71
+ 262 0002 8730      		cpi r24,lo8(7)
+ 263 0004 00F4      		brsh .L18
+ 143:keyboards/ergodox_ez/matrix.c ****             return 0;
+ 264               		.loc 1 143 9 is_stmt 1 view .LVU72
+ 143:keyboards/ergodox_ez/matrix.c ****             return 0;
+ 265               		.loc 1 143 12 is_stmt 0 view .LVU73
+ 266 0006 8091 0000 		lds r24,mcp23018_status
+ 267 000a 9091 0000 		lds r25,mcp23018_status+1
+ 268               	.LVL11:
+ 144:keyboards/ergodox_ez/matrix.c ****         } else {
+ 269               		.loc 1 144 20 view .LVU74
+ 270 000e C0E0      		ldi r28,0
+ 143:keyboards/ergodox_ez/matrix.c ****             return 0;
+ 271               		.loc 1 143 12 view .LVU75
+ 272 0010 892B      		or r24,r25
+ 273 0012 01F4      		brne .L17
+ 274               	.LBB2:
+ 146:keyboards/ergodox_ez/matrix.c ****             // reading GPIOB (column port) since in mcp23018's sequential mode
+ 275               		.loc 1 146 13 is_stmt 1 view .LVU76
+ 276               	.LVL12:
+ 149:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_read_nack(ERGODOX_EZ_I2C_TIMEOUT);               if (mcp23018_sta
+ 277               		.loc 1 149 13 view .LVU77
+ 149:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_read_nack(ERGODOX_EZ_I2C_TIMEOUT);               if (mcp23018_sta
+ 278               		.loc 1 149 31 is_stmt 0 view .LVU78
+ 279 0014 64E6      		ldi r22,lo8(100)
+ 280 0016 70E0      		ldi r23,0
+ 281 0018 81E4      		ldi r24,lo8(65)
+ 282 001a 0E94 0000 		call i2c_start
+ 283               	.LVL13:
+ 149:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_read_nack(ERGODOX_EZ_I2C_TIMEOUT);               if (mcp23018_sta
+ 284               		.loc 1 149 29 view .LVU79
+ 285 001e 9093 0000 		sts mcp23018_status+1,r25
+ 286 0022 8093 0000 		sts mcp23018_status,r24
+ 149:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_read_nack(ERGODOX_EZ_I2C_TIMEOUT);               if (mcp23018_sta
+ 287               		.loc 1 149 84 is_stmt 1 view .LVU80
+ 149:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = i2c_read_nack(ERGODOX_EZ_I2C_TIMEOUT);               if (mcp23018_sta
+ 288               		.loc 1 149 87 is_stmt 0 view .LVU81
+ 289 0026 892B      		or r24,r25
+ 290 0028 01F0      		breq .L20
+ 291               	.L23:
+ 146:keyboards/ergodox_ez/matrix.c ****             // reading GPIOB (column port) since in mcp23018's sequential mode
+ 292               		.loc 1 146 21 view .LVU82
+ 293 002a C0E0      		ldi r28,0
+ 294               	.LVL14:
+ 295               	.L21:
+ 154:keyboards/ergodox_ez/matrix.c ****             return data;
+ 296               		.loc 1 154 13 is_stmt 1 view .LVU83
+ 297 002c 0E94 0000 		call i2c_stop
+ 298               	.LVL15:
+ 155:keyboards/ergodox_ez/matrix.c ****         }
+ 299               		.loc 1 155 13 view .LVU84
+ 300               	.L17:
+ 155:keyboards/ergodox_ez/matrix.c ****         }
+ 301               		.loc 1 155 13 is_stmt 0 view .LVU85
+ 302               	.LBE2:
+ 166:keyboards/ergodox_ez/matrix.c **** 
+ 303               		.loc 1 166 1 view .LVU86
+ 304 0030 8C2F      		mov r24,r28
+ 305               	/* epilogue start */
+ 306 0032 CF91      		pop r28
+ 307 0034 0895      		ret
+ 308               	.LVL16:
+ 309               	.L20:
+ 310               	.LBB3:
+ 150:keyboards/ergodox_ez/matrix.c ****             data            = ~((uint8_t)mcp23018_status);
+ 311               		.loc 1 150 13 is_stmt 1 view .LVU87
+ 150:keyboards/ergodox_ez/matrix.c ****             data            = ~((uint8_t)mcp23018_status);
+ 312               		.loc 1 150 31 is_stmt 0 view .LVU88
+ 313 0036 84E6      		ldi r24,lo8(100)
+ 314 0038 90E0      		ldi r25,0
+ 315 003a 0E94 0000 		call i2c_read_nack
+ 316               	.LVL17:
+ 150:keyboards/ergodox_ez/matrix.c ****             data            = ~((uint8_t)mcp23018_status);
+ 317               		.loc 1 150 84 is_stmt 1 view .LVU89
+ 150:keyboards/ergodox_ez/matrix.c ****             data            = ~((uint8_t)mcp23018_status);
+ 318               		.loc 1 150 87 is_stmt 0 view .LVU90
+ 319 003e 97FF      		sbrs r25,7
+ 320 0040 00C0      		rjmp .L22
+ 150:keyboards/ergodox_ez/matrix.c ****             data            = ~((uint8_t)mcp23018_status);
+ 321               		.loc 1 150 29 view .LVU91
+ 322 0042 9093 0000 		sts mcp23018_status+1,r25
+ 323 0046 8093 0000 		sts mcp23018_status,r24
+ 324 004a 00C0      		rjmp .L23
+ 325               	.L22:
+ 151:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = I2C_STATUS_SUCCESS;
+ 326               		.loc 1 151 13 is_stmt 1 view .LVU92
+ 151:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = I2C_STATUS_SUCCESS;
+ 327               		.loc 1 151 29 is_stmt 0 view .LVU93
+ 328 004c C82F      		mov r28,r24
+ 329 004e C095      		com r28
+ 330               	.LVL18:
+ 152:keyboards/ergodox_ez/matrix.c ****         out:
+ 331               		.loc 1 152 13 is_stmt 1 view .LVU94
+ 152:keyboards/ergodox_ez/matrix.c ****         out:
+ 332               		.loc 1 152 29 is_stmt 0 view .LVU95
+ 333 0050 1092 0000 		sts mcp23018_status+1,__zero_reg__
+ 334 0054 1092 0000 		sts mcp23018_status,__zero_reg__
+ 335 0058 00C0      		rjmp .L21
+ 336               	.LVL19:
+ 337               	.L18:
+ 152:keyboards/ergodox_ez/matrix.c ****         out:
+ 338               		.loc 1 152 29 view .LVU96
+ 339               	.LBE3:
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 340               		.loc 1 164 9 is_stmt 1 view .LVU97
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 341               		.loc 1 164 19 is_stmt 0 view .LVU98
+ 342 005a CFB1      		in r28,0xf
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 343               		.loc 1 164 36 view .LVU99
+ 344 005c 8FB1      		in r24,0xf
+ 345               	.LVL20:
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 346               		.loc 1 164 49 view .LVU100
+ 347 005e 8695      		lsr r24
+ 348 0060 8695      		lsr r24
+ 349 0062 8C73      		andi r24,lo8(60)
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 350               		.loc 1 164 24 view .LVU101
+ 351 0064 C370      		andi r28,lo8(3)
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 352               		.loc 1 164 32 view .LVU102
+ 353 0066 8C2B      		or r24,r28
+ 164:keyboards/ergodox_ez/matrix.c ****     }
+ 354               		.loc 1 164 16 view .LVU103
+ 355 0068 C82F      		mov r28,r24
+ 356 006a C095      		com r28
+ 357 006c 00C0      		rjmp .L17
+ 358               		.cfi_endproc
+ 359               	.LFE133:
+ 361               		.section	.text.matrix_init_custom,"ax",@progbits
+ 362               	.global	matrix_init_custom
+ 364               	matrix_init_custom:
+ 365               	.LFB129:
+  61:keyboards/ergodox_ez/matrix.c ****     // initialize row and col
+ 366               		.loc 1 61 31 is_stmt 1 view -0
+ 367               		.cfi_startproc
+ 368               	/* prologue: function */
+ 369               	/* frame size = 0 */
+ 370               	/* stack size = 0 */
+ 371               	.L__stack_usage = 0
+  64:keyboards/ergodox_ez/matrix.c **** 
+ 372               		.loc 1 64 5 view .LVU105
+  64:keyboards/ergodox_ez/matrix.c **** 
+ 373               		.loc 1 64 23 is_stmt 0 view .LVU106
+ 374 0000 0E94 0000 		call init_mcp23018
+ 375               	.LVL21:
+ 376 0004 90E0      		ldi r25,0
+ 377 0006 9093 0000 		sts mcp23018_status+1,r25
+ 378 000a 8093 0000 		sts mcp23018_status,r24
+  66:keyboards/ergodox_ez/matrix.c ****     init_cols();
+ 379               		.loc 1 66 5 is_stmt 1 view .LVU107
+ 380 000e 0E94 0000 		call unselect_rows
+ 381               	.LVL22:
+  67:keyboards/ergodox_ez/matrix.c **** }
+ 382               		.loc 1 67 5 view .LVU108
+ 383 0012 0C94 0000 		jmp init_cols
+ 384               	.LVL23:
+ 385               		.cfi_endproc
+ 386               	.LFE129:
+ 388               		.section	.text.matrix_scan_custom,"ax",@progbits
+ 389               	.global	matrix_scan_custom
+ 391               	matrix_scan_custom:
+ 392               	.LVL24:
+ 393               	.LFB131:
+  81:keyboards/ergodox_ez/matrix.c ****     if (mcp23018_status) {  // if there was an error
+ 394               		.loc 1 81 56 view -0
+ 395               		.cfi_startproc
+  81:keyboards/ergodox_ez/matrix.c ****     if (mcp23018_status) {  // if there was an error
+ 396               		.loc 1 81 56 is_stmt 0 view .LVU110
+ 397 0000 EF92      		push r14
+ 398               	.LCFI2:
+ 399               		.cfi_def_cfa_offset 3
+ 400               		.cfi_offset 14, -2
+ 401 0002 FF92      		push r15
+ 402               	.LCFI3:
+ 403               		.cfi_def_cfa_offset 4
+ 404               		.cfi_offset 15, -3
+ 405 0004 0F93      		push r16
+ 406               	.LCFI4:
+ 407               		.cfi_def_cfa_offset 5
+ 408               		.cfi_offset 16, -4
+ 409 0006 1F93      		push r17
+ 410               	.LCFI5:
+ 411               		.cfi_def_cfa_offset 6
+ 412               		.cfi_offset 17, -5
+ 413 0008 CF93      		push r28
+ 414               	.LCFI6:
+ 415               		.cfi_def_cfa_offset 7
+ 416               		.cfi_offset 28, -6
+ 417 000a DF93      		push r29
+ 418               	.LCFI7:
+ 419               		.cfi_def_cfa_offset 8
+ 420               		.cfi_offset 29, -7
+ 421               	/* prologue: function */
+ 422               	/* frame size = 0 */
+ 423               	/* stack size = 6 */
+ 424               	.L__stack_usage = 6
+  82:keyboards/ergodox_ez/matrix.c ****         if (++mcp23018_reset_loop == 0) {
+ 425               		.loc 1 82 5 is_stmt 1 view .LVU111
+  82:keyboards/ergodox_ez/matrix.c ****         if (++mcp23018_reset_loop == 0) {
+ 426               		.loc 1 82 8 is_stmt 0 view .LVU112
+ 427 000c 8091 0000 		lds r24,mcp23018_status
+ 428 0010 9091 0000 		lds r25,mcp23018_status+1
+ 429               	.LVL25:
+  82:keyboards/ergodox_ez/matrix.c ****         if (++mcp23018_reset_loop == 0) {
+ 430               		.loc 1 82 8 view .LVU113
+ 431 0014 892B      		or r24,r25
+ 432 0016 01F0      		breq .L28
+  83:keyboards/ergodox_ez/matrix.c ****             print("trying to reset mcp23018\n");
+ 433               		.loc 1 83 9 is_stmt 1 view .LVU114
+  83:keyboards/ergodox_ez/matrix.c ****             print("trying to reset mcp23018\n");
+ 434               		.loc 1 83 13 is_stmt 0 view .LVU115
+ 435 0018 8091 0000 		lds r24,mcp23018_reset_loop
+ 436 001c 8F5F      		subi r24,lo8(-(1))
+  83:keyboards/ergodox_ez/matrix.c ****             print("trying to reset mcp23018\n");
+ 437               		.loc 1 83 12 view .LVU116
+ 438 001e 8093 0000 		sts mcp23018_reset_loop,r24
+ 439 0022 8111      		cpse r24,__zero_reg__
+ 440 0024 00C0      		rjmp .L28
+  84:keyboards/ergodox_ez/matrix.c ****             mcp23018_status = init_mcp23018();
+ 441               		.loc 1 84 48 is_stmt 1 view .LVU117
+  85:keyboards/ergodox_ez/matrix.c ****             if (mcp23018_status) {
+ 442               		.loc 1 85 13 view .LVU118
+  85:keyboards/ergodox_ez/matrix.c ****             if (mcp23018_status) {
+ 443               		.loc 1 85 31 is_stmt 0 view .LVU119
+ 444 0026 0E94 0000 		call init_mcp23018
+ 445               	.LVL26:
+ 446 002a 90E0      		ldi r25,0
+  85:keyboards/ergodox_ez/matrix.c ****             if (mcp23018_status) {
+ 447               		.loc 1 85 29 view .LVU120
+ 448 002c 9093 0000 		sts mcp23018_status+1,r25
+ 449 0030 8093 0000 		sts mcp23018_status,r24
+  86:keyboards/ergodox_ez/matrix.c ****                 print("left side not responding\n");
+ 450               		.loc 1 86 13 is_stmt 1 view .LVU121
+  86:keyboards/ergodox_ez/matrix.c ****                 print("left side not responding\n");
+ 451               		.loc 1 86 16 is_stmt 0 view .LVU122
+ 452 0034 892B      		or r24,r25
+ 453 0036 01F4      		brne .L28
+  89:keyboards/ergodox_ez/matrix.c ****                 ergodox_blink_all_leds();
+ 454               		.loc 1 89 46 is_stmt 1 view .LVU123
+  90:keyboards/ergodox_ez/matrix.c **** #ifdef RGB_MATRIX_ENABLE
+ 455               		.loc 1 90 17 view .LVU124
+ 456 0038 0E94 0000 		call ergodox_blink_all_leds
+ 457               	.LVL27:
+ 458               	.L28:
+ 459 003c 00E0      		ldi r16,lo8(raw_matrix)
+ 460 003e 10E0      		ldi r17,hi8(raw_matrix)
+  81:keyboards/ergodox_ez/matrix.c ****     if (mcp23018_status) {  // if there was an error
+ 461               		.loc 1 81 56 is_stmt 0 discriminator 3 view .LVU125
+ 462 0040 C0E0      		ldi r28,0
+ 463 0042 D0E0      		ldi r29,0
+ 464               	.L32:
+ 465               	.LVL28:
+ 466               	.LBB10:
+ 467               	.LBB11:
+ 104:keyboards/ergodox_ez/matrix.c ****         uint8_t right_index = i + MATRIX_ROWS_PER_SIDE;
+ 468               		.loc 1 104 9 is_stmt 1 discriminator 3 view .LVU126
+ 105:keyboards/ergodox_ez/matrix.c ****         select_row(left_index);
+ 469               		.loc 1 105 9 discriminator 3 view .LVU127
+ 105:keyboards/ergodox_ez/matrix.c ****         select_row(left_index);
+ 470               		.loc 1 105 17 is_stmt 0 discriminator 3 view .LVU128
+ 471 0044 87E0      		ldi r24,lo8(7)
+ 472 0046 E82E      		mov r14,r24
+ 473 0048 EC0E      		add r14,r28
+ 474               	.LVL29:
+ 106:keyboards/ergodox_ez/matrix.c ****         select_row(right_index);
+ 475               		.loc 1 106 9 is_stmt 1 discriminator 3 view .LVU129
+ 476 004a 8C2F      		mov r24,r28
+ 477 004c 0E94 0000 		call select_row
+ 478               	.LVL30:
+ 107:keyboards/ergodox_ez/matrix.c **** 
+ 479               		.loc 1 107 9 discriminator 3 view .LVU130
+ 480 0050 8E2D      		mov r24,r14
+ 481 0052 0E94 0000 		call select_row
+ 482               	.LVL31:
+ 109:keyboards/ergodox_ez/matrix.c ****         changed |= store_raw_matrix_row(right_index);
+ 483               		.loc 1 109 9 discriminator 3 view .LVU131
+ 484               	.LBB12:
+ 485               	.LBI12:
+  72:keyboards/ergodox_ez/matrix.c ****     matrix_row_t temp = read_cols(index);
+ 486               		.loc 1 72 20 discriminator 3 view .LVU132
+ 487               	.LBB13:
+  73:keyboards/ergodox_ez/matrix.c ****     if (raw_matrix[index] != temp) {
+ 488               		.loc 1 73 5 discriminator 3 view .LVU133
+  73:keyboards/ergodox_ez/matrix.c ****     if (raw_matrix[index] != temp) {
+ 489               		.loc 1 73 25 is_stmt 0 discriminator 3 view .LVU134
+ 490 0056 8C2F      		mov r24,r28
+ 491 0058 0E94 0000 		call read_cols
+ 492               	.LVL32:
+  74:keyboards/ergodox_ez/matrix.c ****         raw_matrix[index] = temp;
+ 493               		.loc 1 74 5 is_stmt 1 discriminator 3 view .LVU135
+  74:keyboards/ergodox_ez/matrix.c ****         raw_matrix[index] = temp;
+ 494               		.loc 1 74 19 is_stmt 0 discriminator 3 view .LVU136
+ 495 005c F801      		movw r30,r16
+ 496 005e 9191      		ld r25,Z+
+ 497 0060 8F01      		movw r16,r30
+  78:keyboards/ergodox_ez/matrix.c **** }
+ 498               		.loc 1 78 12 discriminator 3 view .LVU137
+ 499 0062 F12C      		mov r15,__zero_reg__
+  74:keyboards/ergodox_ez/matrix.c ****         raw_matrix[index] = temp;
+ 500               		.loc 1 74 8 discriminator 3 view .LVU138
+ 501 0064 8917      		cp r24,r25
+ 502 0066 01F0      		breq .L30
+  75:keyboards/ergodox_ez/matrix.c ****         return true;
+ 503               		.loc 1 75 9 is_stmt 1 view .LVU139
+  75:keyboards/ergodox_ez/matrix.c ****         return true;
+ 504               		.loc 1 75 27 is_stmt 0 view .LVU140
+ 505 0068 3197      		sbiw r30,1
+ 506 006a 8083      		st Z,r24
+  76:keyboards/ergodox_ez/matrix.c ****     }
+ 507               		.loc 1 76 9 is_stmt 1 view .LVU141
+  76:keyboards/ergodox_ez/matrix.c ****     }
+ 508               		.loc 1 76 16 is_stmt 0 view .LVU142
+ 509 006c FF24      		clr r15
+ 510 006e F394      		inc r15
+ 511               	.L30:
+ 512               	.LVL33:
+  76:keyboards/ergodox_ez/matrix.c ****     }
+ 513               		.loc 1 76 16 view .LVU143
+ 514               	.LBE13:
+ 515               	.LBE12:
+ 110:keyboards/ergodox_ez/matrix.c **** 
+ 516               		.loc 1 110 9 is_stmt 1 view .LVU144
+ 517               	.LBB14:
+ 518               	.LBI14:
+  72:keyboards/ergodox_ez/matrix.c ****     matrix_row_t temp = read_cols(index);
+ 519               		.loc 1 72 20 view .LVU145
+ 520               	.LBB15:
+  73:keyboards/ergodox_ez/matrix.c ****     if (raw_matrix[index] != temp) {
+ 521               		.loc 1 73 5 view .LVU146
+  73:keyboards/ergodox_ez/matrix.c ****     if (raw_matrix[index] != temp) {
+ 522               		.loc 1 73 25 is_stmt 0 view .LVU147
+ 523 0070 8E2D      		mov r24,r14
+ 524 0072 0E94 0000 		call read_cols
+ 525               	.LVL34:
+  74:keyboards/ergodox_ez/matrix.c ****         raw_matrix[index] = temp;
+ 526               		.loc 1 74 5 is_stmt 1 view .LVU148
+  74:keyboards/ergodox_ez/matrix.c ****         raw_matrix[index] = temp;
+ 527               		.loc 1 74 8 is_stmt 0 view .LVU149
+ 528 0076 F801      		movw r30,r16
+ 529 0078 9681      		ldd r25,Z+6
+ 530 007a 8917      		cp r24,r25
+ 531 007c 01F0      		breq .L34
+  75:keyboards/ergodox_ez/matrix.c ****         return true;
+ 532               		.loc 1 75 9 is_stmt 1 view .LVU150
+  75:keyboards/ergodox_ez/matrix.c ****         return true;
+ 533               		.loc 1 75 27 is_stmt 0 view .LVU151
+ 534 007e 8683      		std Z+6,r24
+  76:keyboards/ergodox_ez/matrix.c ****     }
+ 535               		.loc 1 76 9 is_stmt 1 view .LVU152
+  76:keyboards/ergodox_ez/matrix.c ****     }
+ 536               		.loc 1 76 16 is_stmt 0 view .LVU153
+ 537 0080 81E0      		ldi r24,lo8(1)
+ 538               	.LVL35:
+ 539               	.L31:
+  76:keyboards/ergodox_ez/matrix.c ****     }
+ 540               		.loc 1 76 16 view .LVU154
+ 541               	.LBE15:
+ 542               	.LBE14:
+ 110:keyboards/ergodox_ez/matrix.c **** 
+ 543               		.loc 1 110 17 view .LVU155
+ 544 0082 8F29      		or r24,r15
+ 545 0084 D82B      		or r29,r24
+ 546               	.LVL36:
+ 112:keyboards/ergodox_ez/matrix.c ****     }
+ 547               		.loc 1 112 9 is_stmt 1 view .LVU156
+ 548 0086 0E94 0000 		call unselect_rows
+ 549               	.LVL37:
+ 550               	.LBE11:
+ 102:keyboards/ergodox_ez/matrix.c ****         // select rows from left and right hands
+ 551               		.loc 1 102 51 view .LVU157
+ 102:keyboards/ergodox_ez/matrix.c ****         // select rows from left and right hands
+ 552               		.loc 1 102 52 is_stmt 0 view .LVU158
+ 553 008a CF5F      		subi r28,lo8(-(1))
+ 554               	.LVL38:
+ 102:keyboards/ergodox_ez/matrix.c ****         // select rows from left and right hands
+ 555               		.loc 1 102 25 is_stmt 1 view .LVU159
+ 102:keyboards/ergodox_ez/matrix.c ****         // select rows from left and right hands
+ 556               		.loc 1 102 5 is_stmt 0 view .LVU160
+ 557 008c C730      		cpi r28,lo8(7)
+ 558 008e 01F4      		brne .L32
+ 559               	.LBE10:
+ 115:keyboards/ergodox_ez/matrix.c **** }
+ 560               		.loc 1 115 5 is_stmt 1 view .LVU161
+ 116:keyboards/ergodox_ez/matrix.c **** 
+ 561               		.loc 1 116 1 is_stmt 0 view .LVU162
+ 562 0090 8D2F      		mov r24,r29
+ 563               	/* epilogue start */
+ 564 0092 DF91      		pop r29
+ 565               	.LVL39:
+ 116:keyboards/ergodox_ez/matrix.c **** 
+ 566               		.loc 1 116 1 view .LVU163
+ 567 0094 CF91      		pop r28
+ 568               	.LVL40:
+ 116:keyboards/ergodox_ez/matrix.c **** 
+ 569               		.loc 1 116 1 view .LVU164
+ 570 0096 1F91      		pop r17
+ 571 0098 0F91      		pop r16
+ 572 009a FF90      		pop r15
+ 573 009c EF90      		pop r14
+ 574               	.LVL41:
+ 116:keyboards/ergodox_ez/matrix.c **** 
+ 575               		.loc 1 116 1 view .LVU165
+ 576 009e 0895      		ret
+ 577               	.LVL42:
+ 578               	.L34:
+ 579               	.LBB19:
+ 580               	.LBB18:
+ 581               	.LBB17:
+ 582               	.LBB16:
+  78:keyboards/ergodox_ez/matrix.c **** }
+ 583               		.loc 1 78 12 view .LVU166
+ 584 00a0 80E0      		ldi r24,0
+ 585               	.LVL43:
+  78:keyboards/ergodox_ez/matrix.c **** }
+ 586               		.loc 1 78 12 view .LVU167
+ 587 00a2 00C0      		rjmp .L31
+ 588               	.LBE16:
+ 589               	.LBE17:
+ 590               	.LBE18:
+ 591               	.LBE19:
+ 592               		.cfi_endproc
+ 593               	.LFE131:
+ 595               		.section	.text.matrix_power_up,"ax",@progbits
+ 596               	.global	matrix_power_up
+ 598               	matrix_power_up:
+ 599               	.LFB136:
+ 240:keyboards/ergodox_ez/matrix.c **** 
+ 241:keyboards/ergodox_ez/matrix.c **** // DO NOT REMOVE
+ 242:keyboards/ergodox_ez/matrix.c **** // Needed for proper wake/sleep
+ 243:keyboards/ergodox_ez/matrix.c **** void matrix_power_up(void) {
+ 600               		.loc 1 243 28 is_stmt 1 view -0
+ 601               		.cfi_startproc
+ 602               	/* prologue: function */
+ 603               	/* frame size = 0 */
+ 604               	/* stack size = 0 */
+ 605               	.L__stack_usage = 0
+ 244:keyboards/ergodox_ez/matrix.c ****     mcp23018_status = init_mcp23018();
+ 606               		.loc 1 244 5 view .LVU169
+ 607               		.loc 1 244 23 is_stmt 0 view .LVU170
+ 608 0000 0E94 0000 		call init_mcp23018
+ 609               	.LVL44:
+ 610 0004 90E0      		ldi r25,0
+ 611 0006 9093 0000 		sts mcp23018_status+1,r25
+ 612 000a 8093 0000 		sts mcp23018_status,r24
+ 245:keyboards/ergodox_ez/matrix.c **** 
+ 246:keyboards/ergodox_ez/matrix.c ****     unselect_rows();
+ 613               		.loc 1 246 5 is_stmt 1 view .LVU171
+ 614 000e 0E94 0000 		call unselect_rows
+ 615               	.LVL45:
+ 247:keyboards/ergodox_ez/matrix.c ****     init_cols();
+ 616               		.loc 1 247 5 view .LVU172
+ 617 0012 0E94 0000 		call init_cols
+ 618               	.LVL46:
+ 248:keyboards/ergodox_ez/matrix.c **** 
+ 249:keyboards/ergodox_ez/matrix.c ****     // initialize matrix state: all keys off
+ 250:keyboards/ergodox_ez/matrix.c ****     for (uint8_t i=0; i < MATRIX_ROWS; i++) {
+ 619               		.loc 1 250 5 view .LVU173
+ 620               	.LBB20:
+ 621               		.loc 1 250 10 view .LVU174
+ 622               		.loc 1 250 23 view .LVU175
+ 623 0016 E0E0      		ldi r30,lo8(matrix)
+ 624 0018 F0E0      		ldi r31,hi8(matrix)
+ 625               	.LVL47:
+ 626               	.L37:
+ 251:keyboards/ergodox_ez/matrix.c ****         matrix[i] = 0;
+ 627               		.loc 1 251 9 discriminator 3 view .LVU176
+ 628               		.loc 1 251 19 is_stmt 0 discriminator 3 view .LVU177
+ 629 001a 1192      		st Z+,__zero_reg__
+ 630               	.LVL48:
+ 250:keyboards/ergodox_ez/matrix.c ****         matrix[i] = 0;
+ 631               		.loc 1 250 40 is_stmt 1 discriminator 3 view .LVU178
+ 250:keyboards/ergodox_ez/matrix.c ****         matrix[i] = 0;
+ 632               		.loc 1 250 23 discriminator 3 view .LVU179
+ 250:keyboards/ergodox_ez/matrix.c ****         matrix[i] = 0;
+ 633               		.loc 1 250 5 is_stmt 0 discriminator 3 view .LVU180
+ 634 001c 80E0      		ldi r24,hi8(matrix+14)
+ 635 001e E030      		cpi r30,lo8(matrix+14)
+ 636 0020 F807      		cpc r31,r24
+ 637 0022 01F4      		brne .L37
+ 638               	/* epilogue start */
+ 639               	.LBE20:
+ 252:keyboards/ergodox_ez/matrix.c ****     }
+ 253:keyboards/ergodox_ez/matrix.c **** 
+ 254:keyboards/ergodox_ez/matrix.c **** }
+ 640               		.loc 1 254 1 view .LVU181
+ 641 0024 0895      		ret
+ 642               		.cfi_endproc
+ 643               	.LFE136:
+ 645               		.section	.bss.mcp23018_reset_loop,"aw",@nobits
+ 648               	mcp23018_reset_loop:
+ 649 0000 00        		.zero	1
+ 650               		.text
+ 651               	.Letext0:
+ 652               		.file 2 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdint.h"
+ 653               		.file 3 "tmk_core/common/keyboard.h"
+ 654               		.file 4 "/usr/local/Cellar/avr-gcc@8/8.4.0/lib/avr-gcc/8/gcc/avr/8.4.0/include/stddef.h"
+ 655               		.file 5 "tmk_core/common/action.h"
+ 656               		.file 6 "tmk_core/common/action_layer.h"
+ 657               		.file 7 "tmk_core/common/debug.h"
+ 658               		.file 8 "tmk_core/common/matrix.h"
+ 659               		.file 9 "lib/lufa/LUFA/Drivers/USB/Core/AVR8/../StdRequestType.h"
+ 660               		.file 10 "lib/lufa/LUFA/Drivers/USB/Core/AVR8/../DeviceStandardReq.h"
+ 661               		.file 11 "lib/lufa/LUFA/Drivers/USB/Core/USBTask.h"
+ 662               		.file 12 "lib/lufa/LUFA/Drivers/USB/Core/HostStandardReq.h"
+ 663               		.file 13 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdio.h"
+ 664               		.file 14 "tmk_core/common/report.h"
+ 665               		.file 15 "tmk_core/common/host.h"
+ 666               		.file 16 "quantum/keycode_config.h"
+ 667               		.file 17 "quantum/keymap.h"
+ 668               		.file 18 "./quantum/color.h"
+ 669               		.file 19 "quantum/rgblight.h"
+ 670               		.file 20 "tmk_core/common/timer.h"
+ 671               		.file 21 "tmk_core/common/action_util.h"
+ 672               		.file 22 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdlib.h"
+ 673               		.file 23 "quantum/process_keycode/process_unicode_common.h"
+ 674               		.file 24 "quantum/quantum.h"
+ 675               		.file 25 "drivers/avr/i2c_master.h"
+ 676               		.file 26 "keyboards/ergodox_ez/ergodox_ez.h"
+ 677               		.file 27 "quantum/quantum_keycodes.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 matrix.c
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:2      *ABS*:000000000000003e __SP_H__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:3      *ABS*:000000000000003d __SP_L__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:4      *ABS*:000000000000003f __SREG__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:5      *ABS*:0000000000000000 __tmp_reg__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:6      *ABS*:0000000000000001 __zero_reg__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:12     .text.init_cols:0000000000000000 init_cols
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:47     .text.unselect_rows:0000000000000000 unselect_rows
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:84     .text.select_row:0000000000000000 select_row
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:246    .text.read_cols:0000000000000000 read_cols
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:364    .text.matrix_init_custom:0000000000000000 matrix_init_custom
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:391    .text.matrix_scan_custom:0000000000000000 matrix_scan_custom
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:648    .bss.mcp23018_reset_loop:0000000000000000 mcp23018_reset_loop
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccOFwtdX.s:598    .text.matrix_power_up:0000000000000000 matrix_power_up
+
+UNDEFINED SYMBOLS
+mcp23018_status
+i2c_start
+i2c_write
+i2c_stop
+i2c_read_nack
+init_mcp23018
+ergodox_blink_all_leds
+raw_matrix
+matrix
+__do_clear_bss

@@ -1,0 +1,30 @@
+   1               		.file	"action_macro.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.Letext0:
+  11               		.file 1 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdint.h"
+  12               		.file 2 "tmk_core/common/keyboard.h"
+  13               		.file 3 "tmk_core/common/action.h"
+  14               		.file 4 "lib/lufa/LUFA/Drivers/USB/Core/AVR8/../StdRequestType.h"
+  15               		.file 5 "lib/lufa/LUFA/Drivers/USB/Core/AVR8/../DeviceStandardReq.h"
+  16               		.file 6 "lib/lufa/LUFA/Drivers/USB/Core/USBTask.h"
+  17               		.file 7 "lib/lufa/LUFA/Drivers/USB/Core/HostStandardReq.h"
+  18               		.file 8 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdio.h"
+  19               		.file 9 "tmk_core/common/report.h"
+  20               		.file 10 "tmk_core/common/action_util.h"
+  21               		.file 11 "tmk_core/common/debug.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 action_macro.c
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccf5iZwX.s:2      *ABS*:000000000000003e __SP_H__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccf5iZwX.s:3      *ABS*:000000000000003d __SP_L__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccf5iZwX.s:4      *ABS*:000000000000003f __SREG__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccf5iZwX.s:5      *ABS*:0000000000000000 __tmp_reg__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//ccf5iZwX.s:6      *ABS*:0000000000000001 __zero_reg__
+
+NO UNDEFINED SYMBOLS

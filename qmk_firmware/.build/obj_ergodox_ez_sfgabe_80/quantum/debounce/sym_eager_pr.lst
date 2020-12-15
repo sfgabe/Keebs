@@ -1,0 +1,782 @@
+   1               		.file	"sym_eager_pr.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               		.section	.text.debounce_init,"ax",@progbits
+  11               	.global	debounce_init
+  13               	debounce_init:
+  14               	.LVL0:
+  15               	.LFB113:
+  16               		.file 1 "quantum/debounce/sym_eager_pr.c"
+   1:quantum/debounce/sym_eager_pr.c **** /*
+   2:quantum/debounce/sym_eager_pr.c **** Copyright 2019 Alex Ong<the.onga@gmail.com>
+   3:quantum/debounce/sym_eager_pr.c **** This program is free software: you can redistribute it and/or modify
+   4:quantum/debounce/sym_eager_pr.c **** it under the terms of the GNU General Public License as published by
+   5:quantum/debounce/sym_eager_pr.c **** the Free Software Foundation, either version 2 of the License, or
+   6:quantum/debounce/sym_eager_pr.c **** (at your option) any later version.
+   7:quantum/debounce/sym_eager_pr.c **** This program is distributed in the hope that it will be useful,
+   8:quantum/debounce/sym_eager_pr.c **** but WITHOUT ANY WARRANTY; without even the implied warranty of
+   9:quantum/debounce/sym_eager_pr.c **** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  10:quantum/debounce/sym_eager_pr.c **** GNU General Public License for more details.
+  11:quantum/debounce/sym_eager_pr.c **** You should have received a copy of the GNU General Public License
+  12:quantum/debounce/sym_eager_pr.c **** along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  13:quantum/debounce/sym_eager_pr.c **** */
+  14:quantum/debounce/sym_eager_pr.c **** 
+  15:quantum/debounce/sym_eager_pr.c **** /*
+  16:quantum/debounce/sym_eager_pr.c **** Basic per-row algorithm. Uses an 8-bit counter per row.
+  17:quantum/debounce/sym_eager_pr.c **** After pressing a key, it immediately changes state, and sets a counter.
+  18:quantum/debounce/sym_eager_pr.c **** No further inputs are accepted until DEBOUNCE milliseconds have occurred.
+  19:quantum/debounce/sym_eager_pr.c **** */
+  20:quantum/debounce/sym_eager_pr.c **** 
+  21:quantum/debounce/sym_eager_pr.c **** #include "matrix.h"
+  22:quantum/debounce/sym_eager_pr.c **** #include "timer.h"
+  23:quantum/debounce/sym_eager_pr.c **** #include "quantum.h"
+  24:quantum/debounce/sym_eager_pr.c **** #include <stdlib.h>
+  25:quantum/debounce/sym_eager_pr.c **** 
+  26:quantum/debounce/sym_eager_pr.c **** #ifndef DEBOUNCE
+  27:quantum/debounce/sym_eager_pr.c **** #    define DEBOUNCE 5
+  28:quantum/debounce/sym_eager_pr.c **** #endif
+  29:quantum/debounce/sym_eager_pr.c **** 
+  30:quantum/debounce/sym_eager_pr.c **** #define debounce_counter_t uint8_t
+  31:quantum/debounce/sym_eager_pr.c **** static bool matrix_need_update;
+  32:quantum/debounce/sym_eager_pr.c **** 
+  33:quantum/debounce/sym_eager_pr.c **** static debounce_counter_t *debounce_counters;
+  34:quantum/debounce/sym_eager_pr.c **** static bool                counters_need_update;
+  35:quantum/debounce/sym_eager_pr.c **** 
+  36:quantum/debounce/sym_eager_pr.c **** #define DEBOUNCE_ELAPSED 251
+  37:quantum/debounce/sym_eager_pr.c **** #define MAX_DEBOUNCE (DEBOUNCE_ELAPSED - 1)
+  38:quantum/debounce/sym_eager_pr.c **** 
+  39:quantum/debounce/sym_eager_pr.c **** static uint8_t wrapping_timer_read(void) {
+  40:quantum/debounce/sym_eager_pr.c ****     static uint16_t time        = 0;
+  41:quantum/debounce/sym_eager_pr.c ****     static uint8_t  last_result = 0;
+  42:quantum/debounce/sym_eager_pr.c ****     uint16_t        new_time    = timer_read();
+  43:quantum/debounce/sym_eager_pr.c ****     uint16_t        diff        = new_time - time;
+  44:quantum/debounce/sym_eager_pr.c ****     time                        = new_time;
+  45:quantum/debounce/sym_eager_pr.c ****     last_result                 = (last_result + diff) % (MAX_DEBOUNCE + 1);
+  46:quantum/debounce/sym_eager_pr.c ****     return last_result;
+  47:quantum/debounce/sym_eager_pr.c **** }
+  48:quantum/debounce/sym_eager_pr.c **** 
+  49:quantum/debounce/sym_eager_pr.c **** void update_debounce_counters(uint8_t num_rows, uint8_t current_time);
+  50:quantum/debounce/sym_eager_pr.c **** void transfer_matrix_values(matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows, uint8_t cu
+  51:quantum/debounce/sym_eager_pr.c **** 
+  52:quantum/debounce/sym_eager_pr.c **** // we use num_rows rather than MATRIX_ROWS to support split keyboards
+  53:quantum/debounce/sym_eager_pr.c **** void debounce_init(uint8_t num_rows) {
+  17               		.loc 1 53 38 view -0
+  18               		.cfi_startproc
+  19               		.loc 1 53 38 is_stmt 0 view .LVU1
+  20 0000 CF93      		push r28
+  21               	.LCFI0:
+  22               		.cfi_def_cfa_offset 3
+  23               		.cfi_offset 28, -2
+  24               	/* prologue: function */
+  25               	/* frame size = 0 */
+  26               	/* stack size = 1 */
+  27               	.L__stack_usage = 1
+  28 0002 C82F      		mov r28,r24
+  54:quantum/debounce/sym_eager_pr.c ****     debounce_counters = (debounce_counter_t *)malloc(num_rows * sizeof(debounce_counter_t));
+  29               		.loc 1 54 5 is_stmt 1 view .LVU2
+  30               		.loc 1 54 47 is_stmt 0 view .LVU3
+  31 0004 90E0      		ldi r25,0
+  32 0006 0E94 0000 		call malloc
+  33               	.LVL1:
+  34               		.loc 1 54 23 view .LVU4
+  35 000a 8093 0000 		sts debounce_counters,r24
+  36 000e 9093 0000 		sts debounce_counters+1,r25
+  55:quantum/debounce/sym_eager_pr.c ****     for (uint8_t r = 0; r < num_rows; r++) {
+  37               		.loc 1 55 5 is_stmt 1 view .LVU5
+  38               	.LBB2:
+  39               		.loc 1 55 10 view .LVU6
+  40               	.LVL2:
+  41               		.loc 1 55 10 is_stmt 0 view .LVU7
+  42 0012 282F      		mov r18,r24
+  43               		.loc 1 55 5 view .LVU8
+  44 0014 FC01      		movw r30,r24
+  56:quantum/debounce/sym_eager_pr.c ****         debounce_counters[r] = DEBOUNCE_ELAPSED;
+  45               		.loc 1 56 30 view .LVU9
+  46 0016 9BEF      		ldi r25,lo8(-5)
+  47               	.LVL3:
+  48               	.L2:
+  55:quantum/debounce/sym_eager_pr.c ****     for (uint8_t r = 0; r < num_rows; r++) {
+  49               		.loc 1 55 25 is_stmt 1 discriminator 1 view .LVU10
+  55:quantum/debounce/sym_eager_pr.c ****     for (uint8_t r = 0; r < num_rows; r++) {
+  50               		.loc 1 55 5 is_stmt 0 discriminator 1 view .LVU11
+  51 0018 8E2F      		mov r24,r30
+  52 001a 821B      		sub r24,r18
+  53 001c 8C17      		cp r24,r28
+  54 001e 00F0      		brlo .L3
+  55               	/* epilogue start */
+  56               	.LBE2:
+  57:quantum/debounce/sym_eager_pr.c ****     }
+  58:quantum/debounce/sym_eager_pr.c **** }
+  57               		.loc 1 58 1 view .LVU12
+  58 0020 CF91      		pop r28
+  59               	.LVL4:
+  60               		.loc 1 58 1 view .LVU13
+  61 0022 0895      		ret
+  62               	.LVL5:
+  63               	.L3:
+  64               	.LBB3:
+  56:quantum/debounce/sym_eager_pr.c ****         debounce_counters[r] = DEBOUNCE_ELAPSED;
+  65               		.loc 1 56 9 is_stmt 1 discriminator 3 view .LVU14
+  56:quantum/debounce/sym_eager_pr.c ****         debounce_counters[r] = DEBOUNCE_ELAPSED;
+  66               		.loc 1 56 30 is_stmt 0 discriminator 3 view .LVU15
+  67 0024 9193      		st Z+,r25
+  68               	.LVL6:
+  55:quantum/debounce/sym_eager_pr.c ****         debounce_counters[r] = DEBOUNCE_ELAPSED;
+  69               		.loc 1 55 39 is_stmt 1 discriminator 3 view .LVU16
+  55:quantum/debounce/sym_eager_pr.c ****         debounce_counters[r] = DEBOUNCE_ELAPSED;
+  70               		.loc 1 55 39 is_stmt 0 discriminator 3 view .LVU17
+  71 0026 00C0      		rjmp .L2
+  72               	.LBE3:
+  73               		.cfi_endproc
+  74               	.LFE113:
+  76               		.section	.text.update_debounce_counters,"ax",@progbits
+  77               	.global	update_debounce_counters
+  79               	update_debounce_counters:
+  80               	.LVL7:
+  81               	.LFB115:
+  59:quantum/debounce/sym_eager_pr.c **** 
+  60:quantum/debounce/sym_eager_pr.c **** void debounce(matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows, bool changed) {
+  61:quantum/debounce/sym_eager_pr.c ****     uint8_t current_time  = wrapping_timer_read();
+  62:quantum/debounce/sym_eager_pr.c ****     bool    needed_update = counters_need_update;
+  63:quantum/debounce/sym_eager_pr.c ****     if (counters_need_update) {
+  64:quantum/debounce/sym_eager_pr.c ****         update_debounce_counters(num_rows, current_time);
+  65:quantum/debounce/sym_eager_pr.c ****     }
+  66:quantum/debounce/sym_eager_pr.c **** 
+  67:quantum/debounce/sym_eager_pr.c ****     if (changed || (needed_update && !counters_need_update) || matrix_need_update) {
+  68:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+  69:quantum/debounce/sym_eager_pr.c ****     }
+  70:quantum/debounce/sym_eager_pr.c **** }
+  71:quantum/debounce/sym_eager_pr.c **** 
+  72:quantum/debounce/sym_eager_pr.c **** // If the current time is > debounce counter, set the counter to enable input.
+  73:quantum/debounce/sym_eager_pr.c **** void update_debounce_counters(uint8_t num_rows, uint8_t current_time) {
+  82               		.loc 1 73 71 is_stmt 1 view -0
+  83               		.cfi_startproc
+  84               		.loc 1 73 71 is_stmt 0 view .LVU19
+  85 0000 EF92      		push r14
+  86               	.LCFI1:
+  87               		.cfi_def_cfa_offset 3
+  88               		.cfi_offset 14, -2
+  89 0002 FF92      		push r15
+  90               	.LCFI2:
+  91               		.cfi_def_cfa_offset 4
+  92               		.cfi_offset 15, -3
+  93 0004 0F93      		push r16
+  94               	.LCFI3:
+  95               		.cfi_def_cfa_offset 5
+  96               		.cfi_offset 16, -4
+  97 0006 1F93      		push r17
+  98               	.LCFI4:
+  99               		.cfi_def_cfa_offset 6
+ 100               		.cfi_offset 17, -5
+ 101 0008 CF93      		push r28
+ 102               	.LCFI5:
+ 103               		.cfi_def_cfa_offset 7
+ 104               		.cfi_offset 28, -6
+ 105 000a DF93      		push r29
+ 106               	.LCFI6:
+ 107               		.cfi_def_cfa_offset 8
+ 108               		.cfi_offset 29, -7
+ 109               	/* prologue: function */
+ 110               	/* frame size = 0 */
+ 111               	/* stack size = 6 */
+ 112               	.L__stack_usage = 6
+ 113 000c A62F      		mov r26,r22
+  74:quantum/debounce/sym_eager_pr.c ****     counters_need_update                 = false;
+ 114               		.loc 1 74 5 is_stmt 1 view .LVU20
+ 115               		.loc 1 74 42 is_stmt 0 view .LVU21
+ 116 000e 1092 0000 		sts counters_need_update,__zero_reg__
+  75:quantum/debounce/sym_eager_pr.c ****     debounce_counter_t *debounce_pointer = debounce_counters;
+ 117               		.loc 1 75 5 is_stmt 1 view .LVU22
+ 118               	.LVL8:
+  76:quantum/debounce/sym_eager_pr.c ****     for (uint8_t row = 0; row < num_rows; row++) {
+ 119               		.loc 1 76 5 view .LVU23
+ 120               	.LBB4:
+ 121               		.loc 1 76 10 view .LVU24
+ 122               		.loc 1 76 10 is_stmt 0 view .LVU25
+ 123 0012 3091 0000 		lds r19,debounce_counters
+ 124               		.loc 1 76 5 view .LVU26
+ 125 0016 E32F      		mov r30,r19
+ 126 0018 F091 0000 		lds r31,debounce_counters+1
+ 127 001c 20E0      		ldi r18,0
+ 128 001e E62E      		mov r14,r22
+ 129 0020 F12C      		mov r15,__zero_reg__
+  77:quantum/debounce/sym_eager_pr.c ****         if (*debounce_pointer != DEBOUNCE_ELAPSED) {
+  78:quantum/debounce/sym_eager_pr.c ****             if (TIMER_DIFF(current_time, *debounce_pointer, MAX_DEBOUNCE) >= DEBOUNCE) {
+  79:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 130               		.loc 1 79 35 view .LVU27
+ 131 0022 BBEF      		ldi r27,lo8(-5)
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 132               		.loc 1 78 17 view .LVU28
+ 133 0024 0BEF      		ldi r16,lo8(-5)
+ 134 0026 10E0      		ldi r17,0
+ 135               	.LVL9:
+ 136               	.L5:
+  76:quantum/debounce/sym_eager_pr.c ****     for (uint8_t row = 0; row < num_rows; row++) {
+ 137               		.loc 1 76 27 is_stmt 1 discriminator 1 view .LVU29
+  76:quantum/debounce/sym_eager_pr.c ****     for (uint8_t row = 0; row < num_rows; row++) {
+ 138               		.loc 1 76 5 is_stmt 0 discriminator 1 view .LVU30
+ 139 0028 9E2F      		mov r25,r30
+ 140 002a 931B      		sub r25,r19
+ 141 002c 9817      		cp r25,r24
+ 142 002e 00F0      		brlo .L9
+ 143 0030 2093 0000 		sts counters_need_update,r18
+ 144               	/* epilogue start */
+ 145               	.LBE4:
+  80:quantum/debounce/sym_eager_pr.c ****             } else {
+  81:quantum/debounce/sym_eager_pr.c ****                 counters_need_update = true;
+  82:quantum/debounce/sym_eager_pr.c ****             }
+  83:quantum/debounce/sym_eager_pr.c ****         }
+  84:quantum/debounce/sym_eager_pr.c ****         debounce_pointer++;
+  85:quantum/debounce/sym_eager_pr.c ****     }
+  86:quantum/debounce/sym_eager_pr.c **** }
+ 146               		.loc 1 86 1 view .LVU31
+ 147 0034 DF91      		pop r29
+ 148 0036 CF91      		pop r28
+ 149 0038 1F91      		pop r17
+ 150 003a 0F91      		pop r16
+ 151 003c FF90      		pop r15
+ 152 003e EF90      		pop r14
+ 153               	.LVL10:
+ 154               		.loc 1 86 1 view .LVU32
+ 155 0040 0895      		ret
+ 156               	.LVL11:
+ 157               	.L9:
+ 158               	.LBB5:
+  77:quantum/debounce/sym_eager_pr.c ****             if (TIMER_DIFF(current_time, *debounce_pointer, MAX_DEBOUNCE) >= DEBOUNCE) {
+ 159               		.loc 1 77 9 is_stmt 1 view .LVU33
+  77:quantum/debounce/sym_eager_pr.c ****             if (TIMER_DIFF(current_time, *debounce_pointer, MAX_DEBOUNCE) >= DEBOUNCE) {
+ 160               		.loc 1 77 13 is_stmt 0 view .LVU34
+ 161 0042 9191      		ld r25,Z+
+ 162               	.LVL12:
+  77:quantum/debounce/sym_eager_pr.c ****             if (TIMER_DIFF(current_time, *debounce_pointer, MAX_DEBOUNCE) >= DEBOUNCE) {
+ 163               		.loc 1 77 12 view .LVU35
+ 164 0044 9B3F      		cpi r25,lo8(-5)
+ 165 0046 01F0      		breq .L5
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 166               		.loc 1 78 13 is_stmt 1 view .LVU36
+ 167 0048 492F      		mov r20,r25
+ 168 004a 50E0      		ldi r21,0
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 169               		.loc 1 78 17 is_stmt 0 view .LVU37
+ 170 004c A917      		cp r26,r25
+ 171 004e 00F0      		brlo .L7
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 172               		.loc 1 78 17 discriminator 1 view .LVU38
+ 173 0050 B701      		movw r22,r14
+ 174 0052 641B      		sub r22,r20
+ 175 0054 750B      		sbc r23,r21
+ 176 0056 AB01      		movw r20,r22
+ 177               	.L8:
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 178               		.loc 1 78 17 discriminator 4 view .LVU39
+ 179 0058 052E      		mov __tmp_reg__,r21
+ 180 005a 000C      		lsl r0
+ 181 005c 660B      		sbc r22,r22
+ 182 005e 770B      		sbc r23,r23
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 183               		.loc 1 78 16 discriminator 4 view .LVU40
+ 184 0060 4E31      		cpi r20,30
+ 185 0062 5105      		cpc r21,__zero_reg__
+ 186 0064 6105      		cpc r22,__zero_reg__
+ 187 0066 7105      		cpc r23,__zero_reg__
+ 188 0068 00F0      		brlo .L10
+  79:quantum/debounce/sym_eager_pr.c ****             } else {
+ 189               		.loc 1 79 17 is_stmt 1 view .LVU41
+  79:quantum/debounce/sym_eager_pr.c ****             } else {
+ 190               		.loc 1 79 35 is_stmt 0 view .LVU42
+ 191 006a AF01      		movw r20,r30
+ 192 006c 4150      		subi r20,1
+ 193 006e 5109      		sbc r21,__zero_reg__
+ 194 0070 EA01      		movw r28,r20
+ 195 0072 B883      		st Y,r27
+ 196 0074 00C0      		rjmp .L5
+ 197               	.L7:
+  78:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer = DEBOUNCE_ELAPSED;
+ 198               		.loc 1 78 17 discriminator 2 view .LVU43
+ 199 0076 E801      		movw r28,r16
+ 200 0078 C41B      		sub r28,r20
+ 201 007a D50B      		sbc r29,r21
+ 202 007c AE01      		movw r20,r28
+ 203 007e 4E0D      		add r20,r14
+ 204 0080 5F1D      		adc r21,r15
+ 205 0082 00C0      		rjmp .L8
+ 206               	.L10:
+  81:quantum/debounce/sym_eager_pr.c ****             }
+ 207               		.loc 1 81 38 view .LVU44
+ 208 0084 21E0      		ldi r18,lo8(1)
+  84:quantum/debounce/sym_eager_pr.c ****     }
+ 209               		.loc 1 84 9 is_stmt 1 view .LVU45
+ 210               	.LVL13:
+  76:quantum/debounce/sym_eager_pr.c ****         if (*debounce_pointer != DEBOUNCE_ELAPSED) {
+ 211               		.loc 1 76 43 view .LVU46
+  76:quantum/debounce/sym_eager_pr.c ****         if (*debounce_pointer != DEBOUNCE_ELAPSED) {
+ 212               		.loc 1 76 43 is_stmt 0 view .LVU47
+ 213 0086 00C0      		rjmp .L5
+ 214               	.LBE5:
+ 215               		.cfi_endproc
+ 216               	.LFE115:
+ 218               		.section	.text.transfer_matrix_values,"ax",@progbits
+ 219               	.global	transfer_matrix_values
+ 221               	transfer_matrix_values:
+ 222               	.LVL14:
+ 223               	.LFB116:
+  87:quantum/debounce/sym_eager_pr.c **** 
+  88:quantum/debounce/sym_eager_pr.c **** // upload from raw_matrix to final matrix;
+  89:quantum/debounce/sym_eager_pr.c **** void transfer_matrix_values(matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows, uint8_t cu
+ 224               		.loc 1 89 112 is_stmt 1 view -0
+ 225               		.cfi_startproc
+ 226               		.loc 1 89 112 is_stmt 0 view .LVU49
+ 227 0000 0F93      		push r16
+ 228               	.LCFI7:
+ 229               		.cfi_def_cfa_offset 3
+ 230               		.cfi_offset 16, -2
+ 231 0002 1F93      		push r17
+ 232               	.LCFI8:
+ 233               		.cfi_def_cfa_offset 4
+ 234               		.cfi_offset 17, -3
+ 235 0004 CF93      		push r28
+ 236               	.LCFI9:
+ 237               		.cfi_def_cfa_offset 5
+ 238               		.cfi_offset 28, -4
+ 239 0006 DF93      		push r29
+ 240               	.LCFI10:
+ 241               		.cfi_def_cfa_offset 6
+ 242               		.cfi_offset 29, -5
+ 243               	/* prologue: function */
+ 244               	/* frame size = 0 */
+ 245               	/* stack size = 4 */
+ 246               	.L__stack_usage = 4
+  90:quantum/debounce/sym_eager_pr.c ****     matrix_need_update                   = false;
+ 247               		.loc 1 90 5 is_stmt 1 view .LVU50
+ 248               		.loc 1 90 42 is_stmt 0 view .LVU51
+ 249 0008 1092 0000 		sts matrix_need_update,__zero_reg__
+  91:quantum/debounce/sym_eager_pr.c ****     debounce_counter_t *debounce_pointer = debounce_counters;
+ 250               		.loc 1 91 5 is_stmt 1 view .LVU52
+ 251               		.loc 1 91 25 is_stmt 0 view .LVU53
+ 252 000c 5091 0000 		lds r21,debounce_counters
+ 253               	.LVL15:
+  92:quantum/debounce/sym_eager_pr.c ****     for (uint8_t row = 0; row < num_rows; row++) {
+ 254               		.loc 1 92 5 is_stmt 1 view .LVU54
+ 255               	.LBB6:
+ 256               		.loc 1 92 10 view .LVU55
+ 257               		.loc 1 92 10 is_stmt 0 view .LVU56
+ 258 0010 3091 0000 		lds r19,counters_need_update
+ 259 0014 DB01      		movw r26,r22
+ 260 0016 8C01      		movw r16,r24
+ 261               	.LBE6:
+  91:quantum/debounce/sym_eager_pr.c ****     debounce_counter_t *debounce_pointer = debounce_counters;
+ 262               		.loc 1 91 25 view .LVU57
+ 263 0018 E52F      		mov r30,r21
+ 264 001a F091 0000 		lds r31,debounce_counters+1
+ 265               	.LBB9:
+ 266               		.loc 1 92 5 view .LVU58
+ 267 001e 90E0      		ldi r25,0
+ 268               	.LVL16:
+ 269               	.L15:
+ 270               		.loc 1 92 27 is_stmt 1 discriminator 1 view .LVU59
+ 271               		.loc 1 92 5 is_stmt 0 discriminator 1 view .LVU60
+ 272 0020 8E2F      		mov r24,r30
+ 273 0022 851B      		sub r24,r21
+ 274 0024 8417      		cp r24,r20
+ 275 0026 00F0      		brlo .L17
+ 276 0028 3093 0000 		sts counters_need_update,r19
+ 277 002c 9093 0000 		sts matrix_need_update,r25
+ 278               	/* epilogue start */
+ 279               	.LBE9:
+  93:quantum/debounce/sym_eager_pr.c ****         matrix_row_t existing_row = cooked[row];
+  94:quantum/debounce/sym_eager_pr.c ****         matrix_row_t raw_row      = raw[row];
+  95:quantum/debounce/sym_eager_pr.c **** 
+  96:quantum/debounce/sym_eager_pr.c ****         // determine new value basd on debounce pointer + raw value
+  97:quantum/debounce/sym_eager_pr.c ****         if (existing_row != raw_row) {
+  98:quantum/debounce/sym_eager_pr.c ****             if (*debounce_pointer == DEBOUNCE_ELAPSED) {
+  99:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer    = current_time;
+ 100:quantum/debounce/sym_eager_pr.c ****                 cooked[row]          = raw_row;
+ 101:quantum/debounce/sym_eager_pr.c ****                 counters_need_update = true;
+ 102:quantum/debounce/sym_eager_pr.c ****             } else {
+ 103:quantum/debounce/sym_eager_pr.c ****                 matrix_need_update = true;
+ 104:quantum/debounce/sym_eager_pr.c ****             }
+ 105:quantum/debounce/sym_eager_pr.c ****         }
+ 106:quantum/debounce/sym_eager_pr.c ****         debounce_pointer++;
+ 107:quantum/debounce/sym_eager_pr.c ****     }
+ 108:quantum/debounce/sym_eager_pr.c **** }
+ 280               		.loc 1 108 1 view .LVU61
+ 281 0030 DF91      		pop r29
+ 282 0032 CF91      		pop r28
+ 283 0034 1F91      		pop r17
+ 284 0036 0F91      		pop r16
+ 285 0038 0895      		ret
+ 286               	.L17:
+ 287               	.LBB10:
+ 288               	.LBB7:
+  93:quantum/debounce/sym_eager_pr.c ****         matrix_row_t existing_row = cooked[row];
+ 289               		.loc 1 93 9 is_stmt 1 view .LVU62
+  93:quantum/debounce/sym_eager_pr.c ****         matrix_row_t existing_row = cooked[row];
+ 290               		.loc 1 93 22 is_stmt 0 view .LVU63
+ 291 003a 6D91      		ld r22,X+
+ 292               	.LVL17:
+  94:quantum/debounce/sym_eager_pr.c **** 
+ 293               		.loc 1 94 9 is_stmt 1 view .LVU64
+  94:quantum/debounce/sym_eager_pr.c **** 
+ 294               		.loc 1 94 22 is_stmt 0 view .LVU65
+ 295 003c E801      		movw r28,r16
+ 296 003e 8991      		ld r24,Y+
+ 297 0040 8E01      		movw r16,r28
+ 298               	.LVL18:
+  97:quantum/debounce/sym_eager_pr.c ****             if (*debounce_pointer == DEBOUNCE_ELAPSED) {
+ 299               		.loc 1 97 9 is_stmt 1 view .LVU66
+  97:quantum/debounce/sym_eager_pr.c ****             if (*debounce_pointer == DEBOUNCE_ELAPSED) {
+ 300               		.loc 1 97 12 is_stmt 0 view .LVU67
+ 301 0042 6817      		cp r22,r24
+ 302 0044 01F0      		breq .L16
+  98:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer    = current_time;
+ 303               		.loc 1 98 13 is_stmt 1 view .LVU68
+  98:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer    = current_time;
+ 304               		.loc 1 98 16 is_stmt 0 view .LVU69
+ 305 0046 6081      		ld r22,Z
+ 306               	.LVL19:
+  98:quantum/debounce/sym_eager_pr.c ****                 *debounce_pointer    = current_time;
+ 307               		.loc 1 98 16 view .LVU70
+ 308 0048 6B3F      		cpi r22,lo8(-5)
+ 309 004a 01F4      		brne .L18
+  99:quantum/debounce/sym_eager_pr.c ****                 cooked[row]          = raw_row;
+ 310               		.loc 1 99 17 is_stmt 1 view .LVU71
+  99:quantum/debounce/sym_eager_pr.c ****                 cooked[row]          = raw_row;
+ 311               		.loc 1 99 38 is_stmt 0 view .LVU72
+ 312 004c 2083      		st Z,r18
+ 313               	.LVL20:
+ 100:quantum/debounce/sym_eager_pr.c ****                 counters_need_update = true;
+ 314               		.loc 1 100 17 is_stmt 1 view .LVU73
+ 100:quantum/debounce/sym_eager_pr.c ****                 counters_need_update = true;
+ 315               		.loc 1 100 38 is_stmt 0 view .LVU74
+ 316 004e BD01      		movw r22,r26
+ 317 0050 6150      		subi r22,1
+ 318 0052 7109      		sbc r23,__zero_reg__
+ 319 0054 EB01      		movw r28,r22
+ 320 0056 8883      		st Y,r24
+ 101:quantum/debounce/sym_eager_pr.c ****             } else {
+ 321               		.loc 1 101 17 is_stmt 1 view .LVU75
+ 101:quantum/debounce/sym_eager_pr.c ****             } else {
+ 322               		.loc 1 101 38 is_stmt 0 view .LVU76
+ 323 0058 31E0      		ldi r19,lo8(1)
+ 324               	.L16:
+ 106:quantum/debounce/sym_eager_pr.c ****     }
+ 325               		.loc 1 106 9 is_stmt 1 discriminator 2 view .LVU77
+ 106:quantum/debounce/sym_eager_pr.c ****     }
+ 326               		.loc 1 106 25 is_stmt 0 discriminator 2 view .LVU78
+ 327 005a 3196      		adiw r30,1
+ 328               	.LVL21:
+ 106:quantum/debounce/sym_eager_pr.c ****     }
+ 329               		.loc 1 106 25 discriminator 2 view .LVU79
+ 330               	.LBE7:
+  92:quantum/debounce/sym_eager_pr.c ****         matrix_row_t existing_row = cooked[row];
+ 331               		.loc 1 92 43 is_stmt 1 discriminator 2 view .LVU80
+  92:quantum/debounce/sym_eager_pr.c ****         matrix_row_t existing_row = cooked[row];
+ 332               		.loc 1 92 43 is_stmt 0 discriminator 2 view .LVU81
+ 333 005c 00C0      		rjmp .L15
+ 334               	.LVL22:
+ 335               	.L18:
+ 336               	.LBB8:
+ 103:quantum/debounce/sym_eager_pr.c ****             }
+ 337               		.loc 1 103 36 view .LVU82
+ 338 005e 91E0      		ldi r25,lo8(1)
+ 339 0060 00C0      		rjmp .L16
+ 340               	.LBE8:
+ 341               	.LBE10:
+ 342               		.cfi_endproc
+ 343               	.LFE116:
+ 345               		.section	.text.debounce,"ax",@progbits
+ 346               	.global	debounce
+ 348               	debounce:
+ 349               	.LVL23:
+ 350               	.LFB114:
+  60:quantum/debounce/sym_eager_pr.c ****     uint8_t current_time  = wrapping_timer_read();
+ 351               		.loc 1 60 90 is_stmt 1 view -0
+ 352               		.cfi_startproc
+  60:quantum/debounce/sym_eager_pr.c ****     uint8_t current_time  = wrapping_timer_read();
+ 353               		.loc 1 60 90 is_stmt 0 view .LVU84
+ 354 0000 DF92      		push r13
+ 355               	.LCFI11:
+ 356               		.cfi_def_cfa_offset 3
+ 357               		.cfi_offset 13, -2
+ 358 0002 EF92      		push r14
+ 359               	.LCFI12:
+ 360               		.cfi_def_cfa_offset 4
+ 361               		.cfi_offset 14, -3
+ 362 0004 FF92      		push r15
+ 363               	.LCFI13:
+ 364               		.cfi_def_cfa_offset 5
+ 365               		.cfi_offset 15, -4
+ 366 0006 0F93      		push r16
+ 367               	.LCFI14:
+ 368               		.cfi_def_cfa_offset 6
+ 369               		.cfi_offset 16, -5
+ 370 0008 1F93      		push r17
+ 371               	.LCFI15:
+ 372               		.cfi_def_cfa_offset 7
+ 373               		.cfi_offset 17, -6
+ 374 000a CF93      		push r28
+ 375               	.LCFI16:
+ 376               		.cfi_def_cfa_offset 8
+ 377               		.cfi_offset 28, -7
+ 378 000c DF93      		push r29
+ 379               	.LCFI17:
+ 380               		.cfi_def_cfa_offset 9
+ 381               		.cfi_offset 29, -8
+ 382               	/* prologue: function */
+ 383               	/* frame size = 0 */
+ 384               	/* stack size = 7 */
+ 385               	.L__stack_usage = 7
+ 386 000e EC01      		movw r28,r24
+ 387 0010 8B01      		movw r16,r22
+ 388 0012 E42E      		mov r14,r20
+ 389 0014 D22E      		mov r13,r18
+  61:quantum/debounce/sym_eager_pr.c ****     bool    needed_update = counters_need_update;
+ 390               		.loc 1 61 5 is_stmt 1 view .LVU85
+ 391               	.LBB13:
+ 392               	.LBI13:
+  39:quantum/debounce/sym_eager_pr.c ****     static uint16_t time        = 0;
+ 393               		.loc 1 39 16 view .LVU86
+ 394               	.LBB14:
+  40:quantum/debounce/sym_eager_pr.c ****     static uint8_t  last_result = 0;
+ 395               		.loc 1 40 5 view .LVU87
+  41:quantum/debounce/sym_eager_pr.c ****     uint16_t        new_time    = timer_read();
+ 396               		.loc 1 41 5 view .LVU88
+  42:quantum/debounce/sym_eager_pr.c ****     uint16_t        diff        = new_time - time;
+ 397               		.loc 1 42 5 view .LVU89
+  42:quantum/debounce/sym_eager_pr.c ****     uint16_t        diff        = new_time - time;
+ 398               		.loc 1 42 35 is_stmt 0 view .LVU90
+ 399 0016 0E94 0000 		call timer_read
+ 400               	.LVL24:
+  43:quantum/debounce/sym_eager_pr.c ****     time                        = new_time;
+ 401               		.loc 1 43 5 is_stmt 1 view .LVU91
+  43:quantum/debounce/sym_eager_pr.c ****     time                        = new_time;
+ 402               		.loc 1 43 44 is_stmt 0 view .LVU92
+ 403 001a 6091 0000 		lds r22,time.6050
+ 404 001e 7091 0000 		lds r23,time.6050+1
+ 405               	.LVL25:
+  44:quantum/debounce/sym_eager_pr.c ****     last_result                 = (last_result + diff) % (MAX_DEBOUNCE + 1);
+ 406               		.loc 1 44 5 is_stmt 1 view .LVU93
+  44:quantum/debounce/sym_eager_pr.c ****     last_result                 = (last_result + diff) % (MAX_DEBOUNCE + 1);
+ 407               		.loc 1 44 33 is_stmt 0 view .LVU94
+ 408 0022 9093 0000 		sts time.6050+1,r25
+ 409 0026 8093 0000 		sts time.6050,r24
+  45:quantum/debounce/sym_eager_pr.c ****     return last_result;
+ 410               		.loc 1 45 5 is_stmt 1 view .LVU95
+  45:quantum/debounce/sym_eager_pr.c ****     return last_result;
+ 411               		.loc 1 45 48 is_stmt 0 view .LVU96
+ 412 002a 2091 0000 		lds r18,last_result.6051
+ 413 002e 30E0      		ldi r19,0
+ 414 0030 261B      		sub r18,r22
+ 415 0032 370B      		sbc r19,r23
+ 416 0034 820F      		add r24,r18
+ 417 0036 931F      		adc r25,r19
+ 418               	.LVL26:
+  45:quantum/debounce/sym_eager_pr.c ****     return last_result;
+ 419               		.loc 1 45 56 view .LVU97
+ 420 0038 6BEF      		ldi r22,lo8(-5)
+ 421 003a 70E0      		ldi r23,0
+ 422               	.LVL27:
+  45:quantum/debounce/sym_eager_pr.c ****     return last_result;
+ 423               		.loc 1 45 56 view .LVU98
+ 424 003c 0E94 0000 		call __udivmodhi4
+ 425 0040 F82E      		mov r15,r24
+  45:quantum/debounce/sym_eager_pr.c ****     return last_result;
+ 426               		.loc 1 45 33 view .LVU99
+ 427 0042 8093 0000 		sts last_result.6051,r24
+  46:quantum/debounce/sym_eager_pr.c **** }
+ 428               		.loc 1 46 5 is_stmt 1 view .LVU100
+ 429               	.LVL28:
+  46:quantum/debounce/sym_eager_pr.c **** }
+ 430               		.loc 1 46 5 is_stmt 0 view .LVU101
+ 431               	.LBE14:
+ 432               	.LBE13:
+  62:quantum/debounce/sym_eager_pr.c ****     if (counters_need_update) {
+ 433               		.loc 1 62 5 is_stmt 1 view .LVU102
+  63:quantum/debounce/sym_eager_pr.c ****         update_debounce_counters(num_rows, current_time);
+ 434               		.loc 1 63 5 view .LVU103
+  63:quantum/debounce/sym_eager_pr.c ****         update_debounce_counters(num_rows, current_time);
+ 435               		.loc 1 63 8 is_stmt 0 view .LVU104
+ 436 0046 8091 0000 		lds r24,counters_need_update
+ 437 004a 8823      		tst r24
+ 438 004c 01F0      		breq .L20
+  64:quantum/debounce/sym_eager_pr.c ****     }
+ 439               		.loc 1 64 9 is_stmt 1 view .LVU105
+ 440 004e 6F2D      		mov r22,r15
+ 441 0050 8E2D      		mov r24,r14
+ 442 0052 0E94 0000 		call update_debounce_counters
+ 443               	.LVL29:
+  67:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+ 444               		.loc 1 67 5 view .LVU106
+  67:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+ 445               		.loc 1 67 8 is_stmt 0 view .LVU107
+ 446 0056 DD20      		tst r13
+ 447 0058 01F0      		breq .L21
+ 448               	.L22:
+  68:quantum/debounce/sym_eager_pr.c ****     }
+ 449               		.loc 1 68 9 is_stmt 1 view .LVU108
+ 450 005a 2F2D      		mov r18,r15
+ 451 005c 4E2D      		mov r20,r14
+ 452 005e B801      		movw r22,r16
+ 453 0060 CE01      		movw r24,r28
+ 454               	/* epilogue start */
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 455               		.loc 1 70 1 is_stmt 0 view .LVU109
+ 456 0062 DF91      		pop r29
+ 457 0064 CF91      		pop r28
+ 458               	.LVL30:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 459               		.loc 1 70 1 view .LVU110
+ 460 0066 1F91      		pop r17
+ 461 0068 0F91      		pop r16
+ 462               	.LVL31:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 463               		.loc 1 70 1 view .LVU111
+ 464 006a FF90      		pop r15
+ 465               	.LVL32:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 466               		.loc 1 70 1 view .LVU112
+ 467 006c EF90      		pop r14
+ 468               	.LVL33:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 469               		.loc 1 70 1 view .LVU113
+ 470 006e DF90      		pop r13
+ 471               	.LVL34:
+  68:quantum/debounce/sym_eager_pr.c ****     }
+ 472               		.loc 1 68 9 view .LVU114
+ 473 0070 0C94 0000 		jmp transfer_matrix_values
+ 474               	.LVL35:
+ 475               	.L21:
+  67:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+ 476               		.loc 1 67 35 discriminator 2 view .LVU115
+ 477 0074 8091 0000 		lds r24,counters_need_update
+ 478 0078 8823      		tst r24
+ 479 007a 01F0      		breq .L22
+ 480               	.L23:
+  67:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+ 481               		.loc 1 67 61 view .LVU116
+ 482 007c 8091 0000 		lds r24,matrix_need_update
+ 483 0080 8111      		cpse r24,__zero_reg__
+ 484 0082 00C0      		rjmp .L22
+ 485               	/* epilogue start */
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 486               		.loc 1 70 1 view .LVU117
+ 487 0084 DF91      		pop r29
+ 488 0086 CF91      		pop r28
+ 489               	.LVL36:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 490               		.loc 1 70 1 view .LVU118
+ 491 0088 1F91      		pop r17
+ 492 008a 0F91      		pop r16
+ 493               	.LVL37:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 494               		.loc 1 70 1 view .LVU119
+ 495 008c FF90      		pop r15
+ 496               	.LVL38:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 497               		.loc 1 70 1 view .LVU120
+ 498 008e EF90      		pop r14
+ 499               	.LVL39:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 500               		.loc 1 70 1 view .LVU121
+ 501 0090 DF90      		pop r13
+ 502               	.LVL40:
+  70:quantum/debounce/sym_eager_pr.c **** 
+ 503               		.loc 1 70 1 view .LVU122
+ 504 0092 0895      		ret
+ 505               	.LVL41:
+ 506               	.L20:
+  67:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+ 507               		.loc 1 67 5 is_stmt 1 view .LVU123
+  67:quantum/debounce/sym_eager_pr.c ****         transfer_matrix_values(raw, cooked, num_rows, current_time);
+ 508               		.loc 1 67 8 is_stmt 0 view .LVU124
+ 509 0094 D110      		cpse r13,__zero_reg__
+ 510 0096 00C0      		rjmp .L22
+ 511 0098 00C0      		rjmp .L23
+ 512               		.cfi_endproc
+ 513               	.LFE114:
+ 515               		.section	.text.debounce_active,"ax",@progbits
+ 516               	.global	debounce_active
+ 518               	debounce_active:
+ 519               	.LFB117:
+ 109:quantum/debounce/sym_eager_pr.c **** 
+ 110:quantum/debounce/sym_eager_pr.c **** bool debounce_active(void) { return true; }
+ 520               		.loc 1 110 28 is_stmt 1 view -0
+ 521               		.cfi_startproc
+ 522               	/* prologue: function */
+ 523               	/* frame size = 0 */
+ 524               	/* stack size = 0 */
+ 525               	.L__stack_usage = 0
+ 526               		.loc 1 110 30 view .LVU126
+ 527               		.loc 1 110 1 is_stmt 0 view .LVU127
+ 528 0000 81E0      		ldi r24,lo8(1)
+ 529               	/* epilogue start */
+ 530 0002 0895      		ret
+ 531               		.cfi_endproc
+ 532               	.LFE117:
+ 534               		.section	.bss.last_result.6051,"aw",@nobits
+ 537               	last_result.6051:
+ 538 0000 00        		.zero	1
+ 539               		.section	.bss.time.6050,"aw",@nobits
+ 542               	time.6050:
+ 543 0000 0000      		.zero	2
+ 544               		.section	.bss.counters_need_update,"aw",@nobits
+ 547               	counters_need_update:
+ 548 0000 00        		.zero	1
+ 549               		.section	.bss.debounce_counters,"aw",@nobits
+ 552               	debounce_counters:
+ 553 0000 0000      		.zero	2
+ 554               		.section	.bss.matrix_need_update,"aw",@nobits
+ 557               	matrix_need_update:
+ 558 0000 00        		.zero	1
+ 559               		.text
+ 560               	.Letext0:
+ 561               		.file 2 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdint.h"
+ 562               		.file 3 "tmk_core/common/matrix.h"
+ 563               		.file 4 "/usr/local/Cellar/avr-gcc@8/8.4.0/lib/avr-gcc/8/gcc/avr/8.4.0/include/stddef.h"
+ 564               		.file 5 "tmk_core/common/keyboard.h"
+ 565               		.file 6 "tmk_core/common/timer.h"
+ 566               		.file 7 "tmk_core/common/action.h"
+ 567               		.file 8 "lib/lufa/LUFA/Drivers/USB/Core/AVR8/../StdRequestType.h"
+ 568               		.file 9 "lib/lufa/LUFA/Drivers/USB/Core/AVR8/../DeviceStandardReq.h"
+ 569               		.file 10 "lib/lufa/LUFA/Drivers/USB/Core/USBTask.h"
+ 570               		.file 11 "lib/lufa/LUFA/Drivers/USB/Core/HostStandardReq.h"
+ 571               		.file 12 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdio.h"
+ 572               		.file 13 "tmk_core/common/report.h"
+ 573               		.file 14 "tmk_core/common/host.h"
+ 574               		.file 15 "tmk_core/common/debug.h"
+ 575               		.file 16 "quantum/keycode_config.h"
+ 576               		.file 17 "quantum/keymap.h"
+ 577               		.file 18 "tmk_core/common/action_layer.h"
+ 578               		.file 19 "tmk_core/common/action_util.h"
+ 579               		.file 20 "/usr/local/Cellar/avr-gcc@8/8.4.0/avr/include/stdlib.h"
+ 580               		.file 21 "quantum/process_keycode/process_unicode_common.h"
+ 581               		.file 22 "quantum/quantum.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 sym_eager_pr.c
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:2      *ABS*:000000000000003e __SP_H__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:3      *ABS*:000000000000003d __SP_L__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:4      *ABS*:000000000000003f __SREG__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:5      *ABS*:0000000000000000 __tmp_reg__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:6      *ABS*:0000000000000001 __zero_reg__
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:13     .text.debounce_init:0000000000000000 debounce_init
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:552    .bss.debounce_counters:0000000000000000 debounce_counters
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:79     .text.update_debounce_counters:0000000000000000 update_debounce_counters
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:547    .bss.counters_need_update:0000000000000000 counters_need_update
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:221    .text.transfer_matrix_values:0000000000000000 transfer_matrix_values
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:557    .bss.matrix_need_update:0000000000000000 matrix_need_update
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:348    .text.debounce:0000000000000000 debounce
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:542    .bss.time.6050:0000000000000000 time.6050
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:537    .bss.last_result.6051:0000000000000000 last_result.6051
+/var/folders/_9/m54r6fns3hz487qfhcdsxzvr0000gn/T//cc6nR7ps.s:518    .text.debounce_active:0000000000000000 debounce_active
+
+UNDEFINED SYMBOLS
+malloc
+timer_read
+__udivmodhi4
+__do_clear_bss
